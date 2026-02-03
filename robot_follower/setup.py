@@ -15,7 +15,7 @@ def recursive_files(prefix, path):
             [str(file) for file in subdir.glob('*') if not file.is_dir()])
             for subdir in Path(path).glob('**')]
 
-package_name = 'robot-follower'
+package_name = 'robot_follower'
 
 setup(
     name=package_name,
@@ -24,8 +24,10 @@ setup(
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
-        ('share/' + package_name, ['package.xml']),
+        ('share/' + package_name, ['p'
+        'ackage.xml']),
         *recursive_files('share/' + package_name, 'launch'),
+        *recursive_files('share/' + package_name, 'config'),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -40,6 +42,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'vision = robot_follower.vision:main',
         ],
     },
 )
