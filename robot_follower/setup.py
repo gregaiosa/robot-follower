@@ -28,6 +28,7 @@ setup(
         'ackage.xml']),
         *recursive_files('share/' + package_name, 'launch'),
         *recursive_files('share/' + package_name, 'config'),
+        *recursive_files('share/' + package_name, 'models'),
     ],
     install_requires=['setuptools'],
     zip_safe=True,

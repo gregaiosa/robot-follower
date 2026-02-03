@@ -1,0 +1,7 @@
+<launch>
+    <arg name="model" default="best.pt" description="YOLO model to run"/>
+
+    <node pkg="robot_follower" exec="vision">
+        <param name="model" value="$(find-pkg-share robot_follower)/models/$(var model)"/>
+    </node>
+</launch>
