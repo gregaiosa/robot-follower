@@ -6,7 +6,9 @@
   <description>TODO: Package description</description>
   <maintainer email="gregory.aiosa@gmail.com">gaiosa</maintainer>
   <license>TODO: License declaration</license>
-
+ 
+  <exec_depend>ultralytics</exec_depend>
+ 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
   <test_depend>ament_pep257</test_depend>
