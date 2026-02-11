@@ -1,9 +1,23 @@
 <launch>
     <arg name="model" default="best.pt" description="YOLO model to run"/>
     <arg name="topic" default="/j100_0076/sensors/camera_0/color/compressed" description="Image topic for YOLO"/>
+    <arg name="camera" default="false" description="Whether to launch the camera node"/>
 
     <node pkg="robot_follower" exec="vision">
         <param name="model" value="$(find-pkg-share robot_follower)/models/$(var model)"/>
 	<param name="topic" value="$(var topic)"/>
     </node>
+
+    <include if="$(var camera)" file="$(find-pkg-share realsense2_camera)/launch/rs_launch.py">
+        <arg name="depth_module.depth_profile" value="1280x720x15" />
+        <!-- <arg name="depth_module.depth_profile" value="640x480x30" /> -->
+        <arg name="rgb_camera.color_profile" value="1280x720x15" />
+        <!-- <arg name="rgb_camera.color_profile" value="640x480x30" /> -->
+        <arg name="enable_sync" value="true" />
+        <arg name="align_depth.enable" value="true" />
+        <arg name="temporal_filter.enable" value="true" />
+        <arg name="spatial_filter.enable" value="true" />
+        <arg name="hole_filling_filter.enable" value="true" />
+        <arg name="align_depth.enable" value="true" />
+    </include>
 </launch>
