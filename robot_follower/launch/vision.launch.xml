@@ -2,10 +2,13 @@
     <arg name="model" default="best.pt" description="YOLO model to run"/>
     <arg name="topic" default="/j100_0076/sensors/camera_0/color/compressed" description="Image topic for YOLO"/>
     <arg name="camera" default="false" description="Whether to launch the camera node"/>
+    <arg name="depth_topic" description="Camera depth topic"/>
 
     <node pkg="robot_follower" exec="vision">
         <param name="model" value="$(find-pkg-share robot_follower)/models/$(var model)"/>
-	    <param name="topic" value="$(var topic)"/>
+	<param name="topic" value="$(var topic)"/>
+	<param name="depth_topic" value="$(var depth_topic)"/>
+	<remap from="/tf" to="/j100_0076/tf"/>
     </node>
 
     <include if="$(var camera)" file="$(find-pkg-share realsense2_camera)/launch/rs_launch.py">

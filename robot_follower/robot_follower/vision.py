@@ -21,8 +21,9 @@ class Vision(Node):
                                value="/image_raw/compressed")
         # self.declare_parameter("depth_topic",
         #                        value="/camera/camera/aligned_depth_to_color/image_raw")
-        self.declare_parameter("depth_topic",
-                               value="/j100_0076/sensors/camera_0/depth/image")
+        # self.declare_parameter("depth_topic",
+        #                        value="/j100_0076/sensors/camera_0/depth/image")
+        self.declare_parameter("depth_topic", value="/j100_0076/sensors/camera_0/depth/compressedDepth")
         # self.declare_parameter("topic",
         #                        value="/j100_0076/sensors/camera_0/color/compressed")
         self.topic = self.get_parameter("topic").get_parameter_value().string_value
@@ -37,7 +38,7 @@ class Vision(Node):
         self.latest_depth_array = None
         self.info_sub = self.create_subscription(
             CameraInfo, 
-            '/camera/camera/aligned_depth_to_color/camera_info',
+            '/j100_0076/sensors/camera_0/depth/camera_info',
             self.info_callback,
             10)
         self.info_pub = self.create_publisher(CameraInfo, 'new_image/camera_info', 10)
@@ -76,7 +77,8 @@ class Vision(Node):
 
             center_x = int(bbox[0] + (bbox[2] - bbox[0]) / 2)
             center_y = int(bbox[1] + (bbox[3] - bbox[1]) / 2)
-
+            
+            # self.get_logger().info(f"Latest Depth array: {self.latest_depth_array}; self.intrinsics: {self.intrinsics}")
             if self.latest_depth_array is not None and self.intrinsics is not None:
                 depth_mm = self.latest_depth_array[center_y, center_x]
                 
@@ -87,7 +89,7 @@ class Vision(Node):
                     self.get_logger().info(f"Depth at center: {z_camera:.2f} m")
                     tf_msg = TransformStamped()
                     tf_msg.header.stamp = self.get_clock().now().to_msg()
-                    tf_msg.header.frame_id = "camera_link"
+                    tf_msg.header.frame_id = "camera_0_link"
                     tf_msg.child_frame_id = "target"
                     tf_msg.transform.translation.x = x_camera
                     tf_msg.transform.translation.y = y_camera
