@@ -19,8 +19,10 @@ class Vision(Node):
 
         self.declare_parameter("topic",
                                value="/image_raw/compressed")
+        # self.declare_parameter("depth_topic",
+        #                        value="/camera/camera/aligned_depth_to_color/image_raw")
         self.declare_parameter("depth_topic",
-                               value="/camera/camera/aligned_depth_to_color/image_raw")
+                               value="/j100_0076/sensors/camera_0/depth/image")
         # self.declare_parameter("topic",
         #                        value="/j100_0076/sensors/camera_0/color/compressed")
         self.topic = self.get_parameter("topic").get_parameter_value().string_value

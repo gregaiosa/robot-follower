@@ -5,7 +5,7 @@
 
     <node pkg="robot_follower" exec="vision">
         <param name="model" value="$(find-pkg-share robot_follower)/models/$(var model)"/>
-	<param name="topic" value="$(var topic)"/>
+	    <param name="topic" value="$(var topic)"/>
     </node>
 
     <include if="$(var camera)" file="$(find-pkg-share realsense2_camera)/launch/rs_launch.py">
