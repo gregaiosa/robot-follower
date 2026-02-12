@@ -89,7 +89,8 @@ class Vision(Node):
                     self.get_logger().info(f"Depth at center: {z_camera:.2f} m")
                     tf_msg = TransformStamped()
                     tf_msg.header.stamp = self.get_clock().now().to_msg()
-                    tf_msg.header.frame_id = "camera_0_link"
+                    # tf_msg.header.frame_id = "camera_0_link"
+                    tf_msg.header.frame_id = "camera_0_depth_optical_frame"
                     tf_msg.child_frame_id = "target"
                     tf_msg.transform.translation.x = x_camera
                     tf_msg.transform.translation.y = y_camera
