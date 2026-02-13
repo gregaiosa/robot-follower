@@ -6,6 +6,7 @@ from cv_bridge import CvBridge
 import cv2
 import numpy as np
 from tf2_ros import TransformBroadcaster, TransformStamped
+from robot_follower.led_control import LEDController
 
 class Vision(Node):
     def __init__(self):
@@ -43,6 +44,7 @@ class Vision(Node):
             10)
         self.info_pub = self.create_publisher(CameraInfo, 'new_image/camera_info', 10)
         self.intrinsics = None
+        self.led_controller = LEDController()
 
     def info_callback(self, msg):
         self.intrinsics = {
@@ -87,22 +89,25 @@ class Vision(Node):
                     x_camera = (center_x - self.intrinsics['cx']) * z_camera / self.intrinsics['fx']
                     y_camera = (center_y - self.intrinsics['cy']) * z_camera / self.intrinsics['fy']
                     self.get_logger().info(f"Depth at center: {z_camera:.2f} m")
-                    tf_msg = TransformStamped()
-                    tf_msg.header.stamp = self.get_clock().now().to_msg()
+                    tf_cam_person = TransformStamped()
+                    tf_cam_person.header.stamp = self.get_clock().now().to_msg()
                     # tf_msg.header.frame_id = "camera_0_link"
-                    tf_msg.header.frame_id = "camera_0_depth_optical_frame"
-                    tf_msg.child_frame_id = "target"
-                    tf_msg.transform.translation.x = x_camera
-                    tf_msg.transform.translation.y = y_camera
-                    tf_msg.transform.translation.z = z_camera
-                    tf_msg.transform.rotation.x = 0.0
-                    tf_msg.transform.rotation.y = 0.0
-                    tf_msg.transform.rotation.z = 0.0
-                    tf_msg.transform.rotation.w = 1.0
-                    self.broadcaster.sendTransform(tf_msg)
+                    tf_cam_person.header.frame_id = "camera_0_depth_optical_frame"
+                    tf_cam_person.child_frame_id = "person"
+                    tf_cam_person.transform.translation.x = x_camera
+                    tf_cam_person.transform.translation.y = y_camera
+                    tf_cam_person.transform.translation.z = z_camera
+                    tf_cam_person.transform.rotation.x = 0.0
+                    tf_cam_person.transform.rotation.y = 0.0
+                    tf_cam_person.transform.rotation.z = 0.0
+                    tf_cam_person.transform.rotation.w = 1.0
+                    self.broadcaster.sendTransform(tf_cam_person)
+                    self.led_controller.set_color(LEDController.GREEN, blink_ms=500)
                 else:
                     self.get_logger().warn("Depth value is zero, cannot determine distance.")
-
+                    self.led_controller.set_color(LEDController.RED, blink_ms=500)
+            else:
+                self.led_controller.set_color(LEDController.RED, blink_ms=0)
             cv2.circle(frame, (center_x, center_y), 5, (0, 255, 0), -1)
         if self.intrinsics:
             info_msg = CameraInfo()
