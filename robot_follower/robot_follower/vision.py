@@ -6,7 +6,7 @@ from cv_bridge import CvBridge
 import cv2
 import numpy as np
 from tf2_ros import TransformBroadcaster, TransformStamped
-from robot_follower.led_control import LEDController
+from robot_follower.led_control import LEDControl
 
 class Vision(Node):
     def __init__(self):
@@ -44,7 +44,7 @@ class Vision(Node):
             10)
         self.info_pub = self.create_publisher(CameraInfo, 'new_image/camera_info', 10)
         self.intrinsics = None
-        self.led_controller = LEDController()
+        self.led_controller = LEDControl()
 
     def info_callback(self, msg):
         self.intrinsics = {
@@ -102,12 +102,12 @@ class Vision(Node):
                     tf_cam_person.transform.rotation.z = 0.0
                     tf_cam_person.transform.rotation.w = 1.0
                     self.broadcaster.sendTransform(tf_cam_person)
-                    self.led_controller.set_color(LEDController.GREEN, blink_ms=500)
+                    self.led_controller.set_color(LEDControl.GREEN, blink_ms=500)
                 else:
                     self.get_logger().warn("Depth value is zero, cannot determine distance.")
-                    self.led_controller.set_color(LEDController.RED, blink_ms=500)
+                    self.led_controller.set_color(LEDControl.RED, blink_ms=500)
             else:
-                self.led_controller.set_color(LEDController.RED, blink_ms=0)
+                self.led_controller.set_color(LEDControl.RED, blink_ms=0)
             cv2.circle(frame, (center_x, center_y), 5, (0, 255, 0), -1)
         if self.intrinsics:
             info_msg = CameraInfo()
