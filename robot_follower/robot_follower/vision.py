@@ -106,9 +106,9 @@ class Vision(Node):
                 else:
                     self.get_logger().warn("Depth value is zero, cannot determine distance.")
                     self.led_controller.set_color(LedControl.YELLOW, blink_ms=0)
-        else:
-            self.led_controller.set_color(LedControl.RED, blink_ms=0)
             cv2.circle(frame, (center_x, center_y), 5, (0, 255, 0), -1)
+        else:
+                self.led_controller.set_color(LedControl.RED, blink_ms=0)
         if self.intrinsics:
             info_msg = CameraInfo()
             info_msg.header = image.header
