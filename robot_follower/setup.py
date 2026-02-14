@@ -44,6 +44,7 @@ setup(
     entry_points={
         'console_scripts': [
             'vision = robot_follower.vision:main',
+            'control = robot_follower.control:main',
         ],
     },
 )
