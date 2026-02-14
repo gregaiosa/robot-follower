@@ -6,7 +6,7 @@ from cv_bridge import CvBridge
 import cv2
 import numpy as np
 from tf2_ros import TransformBroadcaster, TransformStamped
-from geometry_msgs.msg import TransformStamped
+from geometry_msgs.msg import PoseStamped
 from robot_follower.led_control import LedControl
 from rclpy.qos import qos_profile_sensor_data
 
@@ -47,7 +47,7 @@ class Vision(Node):
         self.info_pub = self.create_publisher(CameraInfo, 'new_image/camera_info', 10)
         self.intrinsics = None
         self.led_controller = LedControl()
-        self.person_tf = self.create_publisher(TransformStamped, 'person_tf', 10)
+        self.person_tf = self.create_publisher(PoseStamped, 'person_pose', 10)
 
     def info_callback(self, msg):
         self.intrinsics = {
@@ -83,7 +83,7 @@ class Vision(Node):
             center_x = int(bbox[0] + (bbox[2] - bbox[0]) / 2)
             center_y = int(bbox[1] + (bbox[3] - bbox[1]) / 2)
             
-            self.get_logger().info(f"Latest Depth array: {self.latest_depth_array}; self.intrinsics: {self.intrinsics}")
+            self.get_logger().debug(f"Latest Depth array: {self.latest_depth_array}; self.intrinsics: {self.intrinsics}")
             if self.latest_depth_array is not None and self.intrinsics is not None:
                 depth_mm = self.latest_depth_array[center_y, center_x]
                 
@@ -105,7 +105,17 @@ class Vision(Node):
                     tf_cam_person.transform.rotation.z = 0.0
                     tf_cam_person.transform.rotation.w = 1.0
                     self.broadcaster.sendTransform(tf_cam_person)
-                    self.person_tf.publish(tf_cam_person)
+                    person_msg = PoseStamped()
+                    person_msg.header.stamp = tf_cam_person.header.stamp
+                    person_msg.header.frame_id = tf_cam_person.header.frame_id
+                    person_msg.pose.position.x = x_camera
+                    person_msg.pose.position.y = y_camera
+                    person_msg.pose.position.z = z_camera
+                    person_msg.pose.orientation.x = 0.0
+                    person_msg.pose.orientation.y = 0.0
+                    person_msg.pose.orientation.z = 0.0
+                    person_msg.pose.orientation.w = 1.0
+                    self.person_tf.publish(person_msg)
                     self.led_controller.set_color(LedControl.GREEN, blink_ms=0)
                 else:
                     self.get_logger().warn("Depth value is zero, cannot determine distance.")

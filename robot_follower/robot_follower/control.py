@@ -17,7 +17,7 @@ class Control(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.tf_broadcaster = TransformBroadcaster(self)
         self.goal_pub = self.create_publisher(PoseStamped, 'goal_pose', 10)
-        self.person_sub = self.create_subscription(PoseStamped, 'person_position', self.person_callback, 10)
+        self.person_sub = self.create_subscription(PoseStamped, 'person_pose', self.person_callback, 10)
 
     def person_callback(self, msg):
         try:
