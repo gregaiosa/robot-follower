@@ -4,11 +4,14 @@
     <arg name="camera" default="false" description="Whether to launch the camera node"/>
     <arg name="depth_topic" default="/j100_0076/sensors/camera_0/depth/image" description="Camera depth topic"/>
 
-    <node pkg="robot_follower" exec="vision">
+    <node pkg="robot_follower" exec="vision" name="vision">
         <param name="model" value="$(find-pkg-share robot_follower)/models/$(var model)"/>
-	<param name="topic" value="$(var topic)"/>
-	<param name="depth_topic" value="$(var depth_topic)"/>
-	<remap from="/tf" to="/j100_0076/tf"/>
+	    <param name="topic" value="$(var topic)"/>
+	    <param name="depth_topic" value="$(var depth_topic)"/>
+	    <remap from="/tf" to="/j100_0076/tf"/>
+    </node>
+
+    <node pkg="robot_follower" exec="control" name="control">
     </node>
 
     <include if="$(var camera)" file="$(find-pkg-share realsense2_camera)/launch/rs_launch.py">
