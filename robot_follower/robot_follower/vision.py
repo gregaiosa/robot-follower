@@ -82,7 +82,7 @@ class Vision(Node):
             center_x = int(bbox[0] + (bbox[2] - bbox[0]) / 2)
             center_y = int(bbox[1] + (bbox[3] - bbox[1]) / 2)
             
-            # self.get_logger().info(f"Latest Depth array: {self.latest_depth_array}; self.intrinsics: {self.intrinsics}")
+            self.get_logger().info(f"Latest Depth array: {self.latest_depth_array}; self.intrinsics: {self.intrinsics}")
             if self.latest_depth_array is not None and self.intrinsics is not None:
                 depth_mm = self.latest_depth_array[center_y, center_x]
                 
