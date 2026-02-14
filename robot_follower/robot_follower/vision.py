@@ -8,6 +8,7 @@ import numpy as np
 from tf2_ros import TransformBroadcaster, TransformStamped
 from geometry_msgs.msg import TransformStamped
 from robot_follower.led_control import LedControl
+from rclpy.qos import qos_profile_sensor_data
 
 class Vision(Node):
     def __init__(self):
@@ -32,7 +33,7 @@ class Vision(Node):
         self.depth_topic = self.get_parameter("depth_topic").get_parameter_value().string_value
 
         self.create_subscription(CompressedImage, self.topic, self.yolo_callback, 10)
-        self.create_subscription(Image, self.depth_topic, self.depth_callback, 10)
+        self.create_subscription(Image, self.depth_topic, self.depth_callback, qos_profile_sensor_data)
         self.image_pub = self.create_publisher(CompressedImage, 'new_image/compressed', 10)
         self.coord_pub = self.create_publisher(RegionOfInterest, 'vision/target_roi', 10)
 
@@ -42,7 +43,7 @@ class Vision(Node):
             CameraInfo, 
             '/j100_0076/sensors/camera_0/depth/camera_info',
             self.info_callback,
-            10)
+            qos_profile_sensor_data)
         self.info_pub = self.create_publisher(CameraInfo, 'new_image/camera_info', 10)
         self.intrinsics = None
         self.led_controller = LedControl()
