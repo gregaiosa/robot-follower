@@ -34,6 +34,11 @@ class Control(Node):
             self.goal_pub.publish(goal_pose)
         except TransformException as e:
             self.get_logger().warn(f"Could not transform person position to map frame: {e}")
-            
+
+def main():
+    rclpy.init()
+    node = Control()
+    rclpy.spin(node)
+    rclpy.shutdown()         
 
 
