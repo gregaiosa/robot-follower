@@ -12,6 +12,7 @@
     </node>
 
     <node pkg="robot_follower" exec="control" name="control">
+        <remap from="/goal_pose" to="/j100_0076/goal_pose"/>
     </node>
 
     <include if="$(var camera)" file="$(find-pkg-share realsense2_camera)/launch/rs_launch.py">
