@@ -35,7 +35,9 @@ class Control(Node):
             goal_pose = PoseStamped()
             goal_pose = copy.deepcopy(person_position)
             goal_pose.header.frame_id = 'map'
-            self.goal_pub.publish(goal_pose)
+            distance = np.sqrt(person_position.pose.position.x**2 + person_position.pose.position.y**2)
+            if distance > 0.3: # Only publish a goal if the person is more than 0.3 meters away
+                self.goal_pub.publish(goal_pose)
         except TransformException as e:
             self.get_logger().warn(f"Could not transform person position to map frame: {e}")
 
