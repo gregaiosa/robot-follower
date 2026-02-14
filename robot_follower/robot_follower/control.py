@@ -6,9 +6,11 @@ import rclpy
 from rclpy.node import Node
 import numpy as np
 from tf2_ros import buffer, TransformBroadcaster, TransformStamped, TransformListener, TransformException
-from geometry_msgs.msg import PointStamped, PoseStamped
+from geometry_msgs.msg import PoseStamped
+import tf2_geometry_msgs
 from nav_msgs.msg import Goals
 import copy
+
 
 class Control(Node):
     def __init__(self):
@@ -23,7 +25,9 @@ class Control(Node):
         try:
             # Look up the transform from the camera frame to the map frame
             now = msg.header.stamp
-            self.tf_buffer.can_transform('map', msg.header.frame_id, now, timeout=rclpy.duration.Duration(seconds=1.0))
+            if not self.tf_buffer.can_transform('map', msg.header.frame_id, now, timeout=rclpy.duration.Duration(seconds=1.0)):
+                self.get_logger().warn(f"Cannot transform from {msg.header.frame_id} to map frame at time {now}")
+                return
             transform = self.tf_buffer.lookup_transform('map', msg.header.frame_id, now)
             # Transform the person's position to the map frame
             person_position = self.tf_buffer.transform(msg, 'map')
