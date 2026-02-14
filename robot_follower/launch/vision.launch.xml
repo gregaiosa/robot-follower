@@ -9,10 +9,13 @@
 	    <param name="topic" value="$(var topic)"/>
 	    <param name="depth_topic" value="$(var depth_topic)"/>
 	    <remap from="/tf" to="/j100_0076/tf"/>
+        <remap from="/tf_static" to="/j100_0076/tf_static"/>
     </node>
 
     <node pkg="robot_follower" exec="control" name="control">
         <remap from="/goal_pose" to="/j100_0076/goal_pose"/>
+        <remap from="/tf" to="/j100_0076/tf"/>
+        <remap from="/tf_static" to="/j100_0076/tf_static"/>
     </node>
 
     <include if="$(var camera)" file="$(find-pkg-share realsense2_camera)/launch/rs_launch.py">
