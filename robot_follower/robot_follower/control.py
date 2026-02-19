@@ -10,6 +10,8 @@ from geometry_msgs.msg import PoseStamped
 import tf2_geometry_msgs
 from nav_msgs.msg import Goals
 import copy
+from scipy.spatial.transform import Rotation as R
+import numpy as np
 
 
 class Control(Node):
@@ -31,10 +33,25 @@ class Control(Node):
             transform = self.tf_buffer.lookup_transform('map', msg.header.frame_id, now)
             # Transform the person's position to the map frame
             person_position = self.tf_buffer.transform(msg, 'map')
+            r_current = R.from_quat([transform.transform.rotation.x, 
+                                            transform.transform.rotation.y, 
+                                            transform.transform.rotation.z, 
+                                            transform.transform.rotation.w])
+
+            r_rot = R.from_euler('z', 90, degrees=True)
+            r_goal = r_current * r_rot
+            goal_quat = r_goal.as_quat()
+            
             # Publish the person's position as a goal pose
             goal_pose = PoseStamped()
             goal_pose = copy.deepcopy(person_position)
             goal_pose.header.frame_id = 'map'
+            
+            # Set the orientation to face forward (might need to be adjusted)
+            goal_pose.pose.orientation.x = goal_quat[0]
+            goal_pose.pose.orientation.y = goal_quat[1]
+            goal_pose.pose.orientation.z = goal_quat[2]
+            goal_pose.pose.orientation.w = goal_quat[3]
             distance = np.sqrt(person_position.pose.position.x**2 + person_position.pose.position.y**2)
             if distance > 0.3: # Only publish a goal if the person is more than 0.3 meters away
                 self.goal_pub.publish(goal_pose)

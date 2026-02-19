@@ -62,7 +62,7 @@ class Vision(Node):
         # Convert to OpenCV
         cv_image = self.bridge.compressed_imgmsg_to_cv2(image, desired_encoding='bgr8')
         # Run the model
-        results = self.model.predict(cv_image, classes=[0], verbose=False)  # Only detect people (class 0)
+        results = self.model.predict(cv_image, classes=[0], verbose=False, conf = 0.5)  # Only detect people (class 0)
 
         # Get the result and draw it on an OpenCV image
         frame = results[0].plot()
