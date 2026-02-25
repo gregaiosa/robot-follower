@@ -1,67 +1,66 @@
-# This node needs to do a transform lookup from person frame to the map frame, 
-# and then publish a goal pose message to something to follow the person. 
-# It should also publish the person's position in the map frame as a PoseStamped message.
-
 import rclpy
 from rclpy.node import Node
-import numpy as np
-from tf2_ros import buffer, TransformBroadcaster, TransformStamped, TransformListener, TransformException
+from rclpy.action import ActionClient
+from nav2_msgs.action import FollowObject
 from geometry_msgs.msg import PoseStamped
-import tf2_geometry_msgs
-from nav_msgs.msg import Goals
-import copy
-from scipy.spatial.transform import Rotation as R
-import numpy as np
-
 
 class Control(Node):
     def __init__(self):
         super().__init__("control")
-        self.tf_buffer = buffer.Buffer()
-        self.tf_listener = TransformListener(self.tf_buffer, self)
-        self.tf_broadcaster = TransformBroadcaster(self)
-        self.goal_pub = self.create_publisher(PoseStamped, 'goal_pose', 10)
+        
+        # Create an Action Client to talk to the Nav2 following server
+        self.action_client = ActionClient(self, FollowObject, '/j100_0076/follow_object')
+        
+        # Listen to the vision node to know when a person is in frame
         self.person_sub = self.create_subscription(PoseStamped, 'person_pose', self.person_callback, 10)
+        
+        self.goal_sent = False
 
     def person_callback(self, msg):
-        try:
-            # Look up the transform from the camera frame to the map frame
-            now = msg.header.stamp
-            if not self.tf_buffer.can_transform('map', msg.header.frame_id, now, timeout=rclpy.duration.Duration(seconds=1.0)):
-                self.get_logger().warn(f"Cannot transform from {msg.header.frame_id} to map frame at time {now}")
-                return
-            transform = self.tf_buffer.lookup_transform('map', msg.header.frame_id, now)
-            # Transform the person's position to the map frame
-            person_position = self.tf_buffer.transform(msg, 'map')
-            r_current = R.from_quat([transform.transform.rotation.x, 
-                                            transform.transform.rotation.y, 
-                                            transform.transform.rotation.z, 
-                                            transform.transform.rotation.w])
+        # If we see a person and haven't sent the follow goal yet, send it!
+        if not self.goal_sent:
+            self.get_logger().info("Person detected! Triggering Nav2 FollowObject Action...")
+            self.send_goal('person')
+            self.goal_sent = True
 
-            r_rot = R.from_euler('z', 90, degrees=True)
-            r_goal = r_current * r_rot
-            goal_quat = r_goal.as_quat()
+    def send_goal(self, target_frame):
+        # Wait for the action server to be ready
+        self.get_logger().info("Waiting for /j100_0076/follow_object action server...")
+        self.action_client.wait_for_server()
+        
+        # Construct the goal message using the correct attribute
+        goal_msg = FollowObject.Goal()
+        goal_msg.tracked_frame = target_frame  # FIX: changed from target_id to tracked_frame
+        
+        # Send the goal asynchronously
+        self.get_logger().info(f"Sending goal to follow TF frame: {target_frame}")
+        self._send_goal_future = self.action_client.send_goal_async(goal_msg)
+        self._send_goal_future.add_done_callback(self.goal_response_callback)
+
+    def goal_response_callback(self, future):
+        goal_handle = future.result()
+        if not goal_handle.accepted:
+            self.get_logger().warn('Follow goal rejected by the server.')
+            self.goal_sent = False  # allow it to try again
+            return
             
-            # Publish the person's position as a goal pose
-            goal_pose = PoseStamped()
-            goal_pose = copy.deepcopy(person_position)
-            goal_pose.header.frame_id = 'map'
-            
-            # Set the orientation to face forward (might need to be adjusted)
-            goal_pose.pose.orientation.x = goal_quat[0]
-            goal_pose.pose.orientation.y = goal_quat[1]
-            goal_pose.pose.orientation.z = goal_quat[2]
-            goal_pose.pose.orientation.w = goal_quat[3]
-            distance = np.sqrt(person_position.pose.position.x**2 + person_position.pose.position.y**2)
-            if distance > 0.3: # Only publish a goal if the person is more than 0.3 meters away
-                self.goal_pub.publish(goal_pose)
-        except TransformException as e:
-            self.get_logger().warn(f"Could not transform person position to map frame: {e}")
+        self.get_logger().info('Follow goal accepted! The robot should now be following you.')
+
+        self.get_result_future = goal_handle.get_result_async()
+        self.get_result_future.add_done_callback(self.get_result_callback)
+
+    def get_result_callback(self, future):
+        status = future.result().status
+        self.get_logger().info(f'Follow action ended with status code: {status}')
+
+        self.get_logger().info('Ready to track a new person.')
+        self.goal_sent = False
 
 def main():
     rclpy.init()
     node = Control()
     rclpy.spin(node)
-    rclpy.shutdown()         
+    rclpy.shutdown()
 
-
+if __name__ == '__main__':
+    main()

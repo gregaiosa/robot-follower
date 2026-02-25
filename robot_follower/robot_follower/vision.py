@@ -9,6 +9,8 @@ from tf2_ros import TransformBroadcaster, TransformStamped
 from geometry_msgs.msg import PoseStamped
 from robot_follower.led_control import LedControl
 from rclpy.qos import qos_profile_sensor_data
+from scipy.spatial.transform import Rotation as R
+import numpy as np
 
 class Vision(Node):
     def __init__(self):
@@ -93,6 +95,7 @@ class Vision(Node):
                     y_camera = (center_y - self.intrinsics['cy']) * z_camera / self.intrinsics['fy']
                     self.get_logger().info(f"Depth at center: {z_camera:.2f} m")
                     tf_cam_person = TransformStamped()
+                    # tf_cam_person.header.stamp = image.header.stamp 
                     tf_cam_person.header.stamp = self.get_clock().now().to_msg()
                     # tf_msg.header.frame_id = "camera_0_link"
                     tf_cam_person.header.frame_id = "camera_0_depth_optical_frame"
@@ -101,9 +104,9 @@ class Vision(Node):
                     tf_cam_person.transform.translation.y = y_camera
                     tf_cam_person.transform.translation.z = z_camera
                     tf_cam_person.transform.rotation.x = 0.0
-                    tf_cam_person.transform.rotation.y = 0.0
+                    tf_cam_person.transform.rotation.y = -.707
                     tf_cam_person.transform.rotation.z = 0.0
-                    tf_cam_person.transform.rotation.w = 1.0
+                    tf_cam_person.transform.rotation.w = .707
                     self.broadcaster.sendTransform(tf_cam_person)
                     person_msg = PoseStamped()
                     person_msg.header.stamp = tf_cam_person.header.stamp

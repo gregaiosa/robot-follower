@@ -1,11 +1,19 @@
 <launch>
-    <include file="$(find-pkg-share clearpath_nav2_demos)/launch/nav2.launch.py">
-        <arg name="scan_topic" value="/scanner/scan"/>
-    </include>
+    <group>
+        <set_remap from="/tf" to="/j100_0076/tf"/>
+        <set_remap from="/tf_static" to="/j100_0076/tf_static"/>
 
-    <include file="$(find-pkg-share clearpath_nav2_demos)/launch/slam.launch.py">
-        <arg name="scan_topic" value="/scanner/scan"/>
-    </include>
+        <include file="$(find-pkg-share clearpath_nav2_demos)/launch/nav2.launch.py">
+            <arg name="scan_topic" value="/scanner/scan"/>
+            <arg name="use_namespace" value="False"/>
+            <arg name="robot_base_frame" value="chassis_link"/>
+        </include>
 
-    <include file="$(find-pkg-share pointcloud_to_laserscan)/launch/sample_pointcloud_to_laserscan_launch.py"/>
+        <include file="$(find-pkg-share clearpath_nav2_demos)/launch/slam.launch.py">
+            <arg name="scan_topic" value="/scanner/scan"/>
+            <arg name="use_namespace" value="False"/>
+        </include>
+
+        <include file="$(find-pkg-share pointcloud_to_laserscan)/launch/sample_pointcloud_to_laserscan_launch.py"/>
+    </group>
 </launch>
