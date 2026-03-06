@@ -9,9 +9,10 @@
             <arg name="robot_base_frame" value="base_link"/>
         </include>
 
-        <include file="$(find-pkg-share clearpath_nav2_demos)/launch/slam.launch.py">
+        <include file="$(find-pkg-share clearpath_nav2_demos)/launch/localization.launch.py">
             <arg name="scan_topic" value="/scanner/scan"/>
             <arg name="use_namespace" value="False"/>
+            <arg name="map" value="$(find-pkg-share robot_follower)/config/crb.yaml"/>
         </include>
 
         <include file="$(find-pkg-share pointcloud_to_laserscan)/launch/sample_pointcloud_to_laserscan_launch.py"/>

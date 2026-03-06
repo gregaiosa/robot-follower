@@ -34,7 +34,7 @@ class Vision(Node):
         self.topic = self.get_parameter("topic").get_parameter_value().string_value
         self.depth_topic = self.get_parameter("depth_topic").get_parameter_value().string_value
 
-        self.create_subscription(CompressedImage, self.topic, self.yolo_callback, 10)
+        self.create_subscription(CompressedImage, self.topic, self.image_callback, 10)
         self.create_subscription(Image, self.depth_topic, self.depth_callback, qos_profile_sensor_data)
         self.image_pub = self.create_publisher(CompressedImage, 'new_image/compressed', 10)
         self.coord_pub = self.create_publisher(RegionOfInterest, 'vision/target_roi', 10)
@@ -59,7 +59,7 @@ class Vision(Node):
             'cy': msg.k[5]
         }
 
-    def yolo_callback(self, image):
+    def image_callback(self, image):
         """Identify all the objects in the scene"""
         # Convert to OpenCV
         cv_image = self.bridge.compressed_imgmsg_to_cv2(image, desired_encoding='bgr8')
