@@ -34,7 +34,12 @@ class Control(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
-        self.follow_distance = 0.8
+        self.follow_distance = 1.0
+
+        # Handle for watchdog timer
+        self.goal_handle = None
+        # Timer for watchdog event
+        self.watchdog_timer = self.create_timer(0.5, self.watchdog_callback)
 
     def person_callback(self, msg):
         self.last_seen_time = self.get_clock().now()
@@ -70,6 +75,7 @@ class Control(Node):
             if distance < self.follow_distance:
                 self.get_logger().info(f"Robot within {self.follow_distance}m, not moving.")
                 self.get_logger().info(f"Current true distance is {distance:.2f}m.")
+                # self.goal_handle.cancel_goal_async()
                 return 
                 
             # Calculate the new point exactly follow_distance in front of the person
@@ -102,7 +108,7 @@ class Control(Node):
             self.goal_sent = True
         else:
             self.goal_update_pub.publish(person_odom)
-            # self.get_logger().info("Path updated!")
+            self.get_logger().info("Path updated!")
 
     def send_nav_goal(self, initial_pose):
         self.nav_client.wait_for_server()
@@ -115,25 +121,18 @@ class Control(Node):
         self._send_goal_future.add_done_callback(self.nav_response_callback)
 
     def nav_response_callback(self, future):
-        goal_handle = future.result()
-        if not goal_handle.accepted:
+        self.goal_handle = future.result()
+        if not self.goal_handle.accepted:
             self.goal_sent = False
             return
             
-        self.get_result_future = goal_handle.get_result_async()
+        self.get_result_future = self.goal_handle.get_result_async()
         self.get_result_future.add_done_callback(self.nav_result_callback)
 
     def nav_result_callback(self, future):
-        # The robot has reached the ghost coordinate
+        # The goal finished normally, was aborted, or was cancelled by our watchdog
         self.goal_sent = False
-        
-        # Calculate how long it has been since YOLO last published a message
-        time_since_seen = (self.get_clock().now() - self.last_seen_time).nanoseconds / 1e9
-        
-        # If it has been more than missing_timeout, you are truly missing. Start spinning!
-        if time_since_seen > self.missing_timeout:
-            self.get_logger().info(f"Target lost for {time_since_seen:.1f}s. Initiating radar sweep...")
-            self.send_spin_goal()
+        self.goal_handle = None
 
     def send_spin_goal(self):
         self.spin_client.wait_for_server()
@@ -164,6 +163,26 @@ class Control(Node):
         self.goal_sent = False
         self.is_spinning = False
         return response
+
+    def watchdog_callback(self):
+        # Only run the check if we are actively following and NOT already spinning
+        if self.goal_sent and not self.is_spinning:
+            time_since_seen = (self.get_clock().now() - self.last_seen_time).nanoseconds / 1e9
+            
+            if time_since_seen > self.missing_timeout:
+                self.get_logger().warn(f"Target lost for {time_since_seen:.1f}s! Hijacking Nav2...")
+                
+                # 1. Kill the active navigation goal immediately
+                if self.goal_handle:
+                    self.goal_handle.cancel_goal_async()
+                    self.goal_handle = None
+                
+                # 2. Reset our state so we don't keep firing the watchdog
+                self.goal_sent = False 
+                
+                # 3. Start the spin search
+                self.send_spin_goal()
+
 
 def main():
     rclpy.init()
