@@ -1,18 +1,21 @@
 <launch>
+    <arg name="map" default="crb" description="Choose the map to load"/>
     <group>
         <set_remap from="/tf" to="/j100_0076/tf"/>
         <set_remap from="/tf_static" to="/j100_0076/tf_static"/>
 
+        <timer period="10.0">
         <include file="$(find-pkg-share clearpath_nav2_demos)/launch/nav2.launch.py">
             <arg name="scan_topic" value="/scanner/scan"/>
             <arg name="use_namespace" value="False"/>
             <arg name="robot_base_frame" value="base_link"/>
         </include>
+        </timer>
 
         <include file="$(find-pkg-share clearpath_nav2_demos)/launch/localization.launch.py">
             <arg name="scan_topic" value="/scanner/scan"/>
             <arg name="use_namespace" value="False"/>
-            <arg name="map" value="$(find-pkg-share robot_follower)/config/crb.yaml"/>
+            <arg name="map" value="$(find-pkg-share robot_follower)/config/$(var map).yaml"/>
         </include>
 
         <include file="$(find-pkg-share pointcloud_to_laserscan)/launch/sample_pointcloud_to_laserscan_launch.py"/>
