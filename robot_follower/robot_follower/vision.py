@@ -12,7 +12,6 @@ from rclpy.qos import qos_profile_sensor_data
 from scipy.spatial.transform import Rotation as R
 import numpy as np
 from enum import auto, Enum
-from collections import deque
 
 class State(Enum):
     """An enumeration that controls behavior based on yolo model being run."""
@@ -71,7 +70,12 @@ class Vision(Node):
             self.state = State.OBJECT
         self.get_logger().info(f"State is set to {self.state}")
 
-        self.depth_history = deque(maxlen=5)
+        # Implment Exponential Moving Average for location values
+        self.declare_parameter("ema_alpha", value=0.5)
+        self.alpha = self.get_parameter("ema_alpha").get_parameter_value().double_value
+
+        # Store the current filtered pose [x, y, z]
+        self.ema_pose = None
 
     def info_callback(self, msg):
         self.intrinsics = {
@@ -164,15 +168,24 @@ class Vision(Node):
                         depth_mm = 0
                 
                 if depth_mm > 0:
-                    # Add the new valid reading to our rolling history
-                    self.depth_history.append(depth_mm)
-    
-                    # Calculate the average of up to the last 5 readings
-                    avg_depth_mm = sum(self.depth_history) / len(self.depth_history)
 
-                    z_camera = avg_depth_mm / 1000.0  # Convert to meters
-                    x_camera = (center_x - self.intrinsics['cx']) * z_camera / self.intrinsics['fx']
-                    y_camera = (center_y - self.intrinsics['cy']) * z_camera / self.intrinsics['fy']
+                    # 1. Calculate the RAW 3D coordinates for this specific frame
+                    raw_z = depth_mm / 1000.0  # Convert to meters
+                    raw_x = (center_x - self.intrinsics['cx']) * raw_z / self.intrinsics['fx']
+                    raw_y = (center_y - self.intrinsics['cy']) * raw_z / self.intrinsics['fy']
+
+                    # 2. Apply the Exponential Moving Average
+                    if self.ema_pose is None:
+                        # First valid frame: initialize the EMA with the raw readings
+                        self.ema_pose = [raw_x, raw_y, raw_z]
+                    else:
+                        # Subsequent frames: calculate the new EMA
+                        self.ema_pose[0] = (self.alpha * raw_x) + ((1.0 - self.alpha) * self.ema_pose[0])
+                        self.ema_pose[1] = (self.alpha * raw_y) + ((1.0 - self.alpha) * self.ema_pose[1])
+                        self.ema_pose[2] = (self.alpha * raw_z) + ((1.0 - self.alpha) * self.ema_pose[2])
+
+                    x_camera, y_camera, z_camera = self.ema_pose
+
                     self.get_logger().info(f"Depth at center: {z_camera:.2f} m")
                     tf_cam_person = TransformStamped()
                     # tf_cam_person.header.stamp = image.header.stamp 
