@@ -11,6 +11,14 @@ from robot_follower.led_control import LedControl
 from rclpy.qos import qos_profile_sensor_data
 from scipy.spatial.transform import Rotation as R
 import numpy as np
+from enum import auto, Enum
+from collections import deque
+
+class State(Enum):
+    """An enumeration that controls behavior based on yolo model being run."""
+
+    POSE = auto(),
+    OBJECT = auto(),
 
 class Vision(Node):
     def __init__(self):
@@ -21,6 +29,12 @@ class Vision(Node):
         self.declare_parameter("model",
                                value="best.pt")
         self.model = YOLO(self.get_parameter("model").get_parameter_value().string_value)
+
+        # 1. Save the string value to a variable
+        current_model = self.get_parameter("model").get_parameter_value().string_value
+        
+        # 2. Log it with quotes to see exactly what the node is receiving
+        self.get_logger().info(f"Node received model string: '{current_model}'")
 
         self.declare_parameter("topic",
                                value="/image_raw/compressed")
@@ -51,6 +65,14 @@ class Vision(Node):
         self.led_controller = LedControl()
         self.person_tf = self.create_publisher(PoseStamped, 'person_pose', 10)
 
+        if current_model.endswith("yolo26n-pose.pt"):
+            self.state = State.POSE
+        else:
+            self.state = State.OBJECT
+        self.get_logger().info(f"State is set to {self.state}")
+
+        self.depth_history = deque(maxlen=5)
+
     def info_callback(self, msg):
         self.intrinsics = {
             'fx': msg.k[0],
@@ -64,7 +86,12 @@ class Vision(Node):
         # Convert to OpenCV
         cv_image = self.bridge.compressed_imgmsg_to_cv2(image, desired_encoding='bgr8')
         # Run the model
-        results = self.model.predict(cv_image, classes=[0], verbose=False, conf = 0.5)  # Only detect people (class 0)
+        if (self.state == State.POSE):
+            results = self.model.predict(cv_image, conf = 0.5)
+        else:
+            results = self.model.predict(cv_image, classes=[0], verbose=False, conf = 0.5) 
+            
+         # Only detect people (class 0)
 
         # Get the result and draw it on an OpenCV image
         frame = results[0].plot()
@@ -73,24 +100,77 @@ class Vision(Node):
         # [center_x, center_y, width, height]
         if len(results[0].boxes) > 0:  # Check if there are any detections
             # coord_msg.= results[0][0].boxes.xyxy[0].tolist()
-            coord_msg = RegionOfInterest()
-            bbox = results[0].boxes.xyxy[0].cpu().numpy()
-            coord_msg.x_offset = int(bbox[0])
-            coord_msg.y_offset = int(bbox[1])
-            coord_msg.height = int(bbox[3] - bbox[1])
-            coord_msg.width = int(bbox[2] - bbox[0])
-            coord_msg.do_rectify = False
-            self.coord_pub.publish(coord_msg)
+            if self.state == State.OBJECT:
+                coord_msg = RegionOfInterest()
+                bbox = results[0].boxes.xyxy[0].cpu().numpy()
+                coord_msg.x_offset = int(bbox[0])
+                coord_msg.y_offset = int(bbox[1])
+                coord_msg.height = int(bbox[3] - bbox[1])
+                coord_msg.width = int(bbox[2] - bbox[0])
+                coord_msg.do_rectify = False
+                self.coord_pub.publish(coord_msg)
 
-            center_x = int(bbox[0] + (bbox[2] - bbox[0]) / 2)
-            center_y = int(bbox[1] + (bbox[3] - bbox[1]) / 2)
+                center_x = int(bbox[0] + (bbox[2] - bbox[0]) / 2)
+                center_y = int(bbox[1] + (bbox[3] - bbox[1]) / 2)
+
+            else:
+                center_x = 0
+                center_y = 0
+            
             
             self.get_logger().debug(f"Latest Depth array: {self.latest_depth_array}; self.intrinsics: {self.intrinsics}")
             if self.latest_depth_array is not None and self.intrinsics is not None:
-                depth_mm = self.latest_depth_array[center_y, center_x]
+                if self.state == State.OBJECT:
+                    depth_mm = self.latest_depth_array[center_y, center_x]
+                elif self.state == State.POSE:
+                    min_dist = 1e9
+                    best_x, best_y = 0, 0
+                    
+                    for result in results:
+                        # Grab the keypoints for this specific person
+                        # xy[0] extracts the array of keypoints for the first detected person
+                        keypoints = result.keypoints.xy[0].cpu().numpy() 
+                        
+                        # Now iterate through each individual keypoint
+                        for kp in keypoints:
+                            X = int(kp[0])
+                            Y = int(kp[1])
+                            
+                            # Skip keypoints YOLO couldn't see (it sets them to 0,0)
+                            if X == 0 and Y == 0:
+                                continue
+                                
+                            # Constrain X and Y to the actual image dimensions to prevent indexing errors
+                            height, width = self.latest_depth_array.shape
+                            X = max(0, min(X, width - 1))
+                            Y = max(0, min(Y, height - 1))
+                            
+                            pixel_depth = self.latest_depth_array[Y, X]
+                            
+                            # Only update if the depth is valid (> 0) AND closer than previous
+                            if 0 < pixel_depth < min_dist:
+                                min_dist = pixel_depth
+                                best_x = X
+                                best_y = Y
+                                # self.get_logger().info(f"New closest point found at ({X}, {Y}) with depth: {min_dist}")
+
+                    # After checking all keypoints, assign the winning coordinates
+                    if min_dist != 1e9:
+                        center_x = best_x
+                        center_y = best_y
+                        depth_mm = min_dist
+                    else:
+                        # Fallback if no valid depth was found on any keypoint
+                        depth_mm = 0
                 
                 if depth_mm > 0:
-                    z_camera = depth_mm / 1000.0  # Convert to meters
+                    # Add the new valid reading to our rolling history
+                    self.depth_history.append(depth_mm)
+    
+                    # Calculate the average of up to the last 5 readings
+                    avg_depth_mm = sum(self.depth_history) / len(self.depth_history)
+
+                    z_camera = avg_depth_mm / 1000.0  # Convert to meters
                     x_camera = (center_x - self.intrinsics['cx']) * z_camera / self.intrinsics['fx']
                     y_camera = (center_y - self.intrinsics['cy']) * z_camera / self.intrinsics['fy']
                     self.get_logger().info(f"Depth at center: {z_camera:.2f} m")
@@ -123,6 +203,7 @@ class Vision(Node):
                 else:
                     self.get_logger().warn("Depth value is zero, cannot determine distance.")
                     self.led_controller.set_color(LedControl.YELLOW, blink_ms=0)
+    
             cv2.circle(frame, (center_x, center_y), 5, (0, 255, 0), -1)
         else:
                 self.led_controller.set_color(LedControl.RED, blink_ms=0)
