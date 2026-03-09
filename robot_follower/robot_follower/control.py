@@ -41,6 +41,9 @@ class Control(Node):
         # Timer for watchdog event
         self.watchdog_timer = self.create_timer(0.5, self.watchdog_callback)
 
+        # Remember the last know y value (sign) in robot's base_link frame
+        self.last_known_y = 0.0
+
     def person_callback(self, msg):
         self.last_seen_time = self.get_clock().now()
         msg.header.stamp = self.get_clock().now().to_msg()
@@ -54,6 +57,17 @@ class Control(Node):
                 rclpy.time.Time()
             )
             person_odom = tf2_geometry_msgs.do_transform_pose_stamped(msg, transform_to_odom)
+
+            # Transform to base_link to determine Left vs. Right ---
+            transform_to_base_link = self.tf_buffer.lookup_transform(
+                'base_link', 
+                msg.header.frame_id, 
+                rclpy.time.Time()
+            )
+            person_base_link = tf2_geometry_msgs.do_transform_pose_stamped(msg, transform_to_base_link)
+            
+            # Save the Y coordinate. Positive = Left, Negative = Right.
+            self.last_known_y = person_base_link.pose.position.y
             
             # 2. Get the robot's current position in the 'odom' frame
             robot_transform = self.tf_buffer.lookup_transform(
@@ -137,8 +151,13 @@ class Control(Node):
     def send_spin_goal(self):
         self.spin_client.wait_for_server()
         goal_msg = Spin.Goal()
-        # Spin 6.28 radians (a full 360-degree sweep)
-        goal_msg.target_yaw = 6.28  
+        
+        # If last_known_y is positive (left), multiply by 1.0 (Spin CCW)
+        # If last_known_y is negative (right), multiply by -1.0 (Spin CW)
+        spin_direction = 1.0 if self.last_known_y >= 0 else -1.0
+        
+        # Spin 6.28 radians (360 degrees) in the correct direction
+        goal_msg.target_yaw = spin_direction * 6.28  
         
         self.is_spinning = True
         self._send_spin_future = self.spin_client.send_goal_async(goal_msg)
