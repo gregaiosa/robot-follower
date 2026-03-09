@@ -44,6 +44,16 @@ class Control(Node):
         # Remember the last know y value (sign) in robot's base_link frame
         self.last_known_y = 0.0
 
+        # Deadband Tracking
+        self.last_goal_x = None
+        self.last_goal_y = None
+        self.deadband_radius = 0.25  # Require 25cm of movement to update the goal
+        
+        # EMA Tracking in Odom Frame ---
+        self.alpha = 0.5  # Smoothing factor (0.0 to 1.0)
+        self.ema_person_x = None
+        self.ema_person_y = None
+
     def person_callback(self, msg):
         self.last_seen_time = self.get_clock().now()
         msg.header.stamp = self.get_clock().now().to_msg()
@@ -78,26 +88,46 @@ class Control(Node):
             robot_x = robot_transform.transform.translation.x
             robot_y = robot_transform.transform.translation.y
             
-            # 3. Now we can safely use X and Y because they represent the flat floor!
-            person_x = person_odom.pose.position.x
-            person_y = person_odom.pose.position.y
+            # Apply EMA to the ODOM coordinates
+            raw_person_x = person_odom.pose.position.x
+            raw_person_y = person_odom.pose.position.y
             
-            dx = person_x - robot_x
-            dy = person_y - robot_y
+            if self.ema_person_x is None:
+                self.ema_person_x = raw_person_x
+                self.ema_person_y = raw_person_y
+            else:
+                self.ema_person_x = (self.alpha * raw_person_x) + ((1.0 - self.alpha) * self.ema_person_x)
+                self.ema_person_y = (self.alpha * raw_person_y) + ((1.0 - self.alpha) * self.ema_person_y)
+            
+            # 3. Calculate distance using the SMOOTHED coordinates
+            dx = self.ema_person_x - robot_x
+            dy = self.ema_person_y - robot_y
             distance = math.hypot(dx, dy)
             
             if distance < self.follow_distance:
                 self.get_logger().info(f"Robot within {self.follow_distance}m, not moving.")
                 self.get_logger().info(f"Current true distance is {distance:.2f}m.")
-                # self.goal_handle.cancel_goal_async()
                 return 
                 
             # Calculate the new point exactly follow_distance in front of the person
             ratio = (distance - self.follow_distance) / distance
             
+            new_goal_x = robot_x + (dx * ratio)
+            new_goal_y = robot_y + (dy * ratio)
+
+            # Deadband Logic (Don't spam MPPI if the goal hasn't moved much) ---
+            if self.goal_sent and self.last_goal_x is not None:
+                goal_shift = math.hypot(new_goal_x - self.last_goal_x, new_goal_y - self.last_goal_y)
+                if goal_shift < self.deadband_radius:
+                    return  # Ignore small jitters, let MPPI keep its current optimized path
+            
+            # Save the new valid goal
+            self.last_goal_x = new_goal_x
+            self.last_goal_y = new_goal_y
+            
             # Update the transformed message with the new calculated point
-            person_odom.pose.position.x = robot_x + (dx * ratio)
-            person_odom.pose.position.y = robot_y + (dy * ratio)
+            person_odom.pose.position.x = new_goal_x
+            person_odom.pose.position.y = new_goal_y
             
             # Force the robot to rotate to face the person
             yaw = math.atan2(dy, dx)
@@ -147,6 +177,11 @@ class Control(Node):
         # The goal finished normally, was aborted, or was cancelled by our watchdog
         self.goal_sent = False
         self.goal_handle = None
+        # Reset EMA and Deadband so it doesn't jump weirdly when acquiring a new target
+        self.ema_person_x = None
+        self.ema_person_y = None
+        self.last_goal_x = None
+        self.last_goal_y = None
 
     def send_spin_goal(self):
         self.spin_client.wait_for_server()
@@ -181,6 +216,10 @@ class Control(Node):
     async def reset_callback(self, request, response):
         self.goal_sent = False
         self.is_spinning = False
+        self.ema_person_x = None
+        self.ema_person_y = None
+        self.last_goal_x = None
+        self.last_goal_y = None
         return response
 
     def watchdog_callback(self):
@@ -198,6 +237,10 @@ class Control(Node):
                 
                 # 2. Reset our state so we don't keep firing the watchdog
                 self.goal_sent = False 
+                self.ema_person_x = None
+                self.ema_person_y = None
+                self.last_goal_x = None
+                self.last_goal_y = None
                 
                 # 3. Start the spin search
                 self.send_spin_goal()

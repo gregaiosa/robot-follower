@@ -71,7 +71,7 @@ class Vision(Node):
         self.get_logger().info(f"State is set to {self.state}")
 
         # Implment Exponential Moving Average for location values
-        self.declare_parameter("ema_alpha", value=0.5)
+        self.declare_parameter("ema_alpha", value=1.0)
         self.alpha = self.get_parameter("ema_alpha").get_parameter_value().double_value
 
         # Store the current filtered pose [x, y, z]
