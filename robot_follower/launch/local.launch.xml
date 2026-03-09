@@ -5,14 +5,14 @@
         <set_remap from="/tf_static" to="/j100_0076/tf_static"/>
 
         <timer period="10.0">
-        <include file="$(find-pkg-share robot-follower)/launch/nav2.launch.py">
+        <include file="$(find-pkg-share robot_follower)/launch/nav2.launch.py">
             <arg name="scan_topic" value="/scanner/scan"/>
             <arg name="use_namespace" value="False"/>
             <arg name="robot_base_frame" value="base_link"/>
         </include>
         </timer>
 
-        <include file="$(find-pkg-share robot-follower)/launch/localization.launch.py">
+        <include file="$(find-pkg-share robot_follower)/launch/localization.launch.py">
             <arg name="scan_topic" value="/scanner/scan"/>
             <arg name="use_namespace" value="False"/>
             <arg name="map" value="$(find-pkg-share robot_follower)/config/$(var map).yaml"/>
