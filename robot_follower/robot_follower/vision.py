@@ -10,7 +10,6 @@ from geometry_msgs.msg import PoseStamped
 from robot_follower.led_control import LedControl
 from rclpy.qos import qos_profile_sensor_data
 from scipy.spatial.transform import Rotation as R
-import numpy as np
 from enum import auto, Enum
 
 class State(Enum):
@@ -91,7 +90,7 @@ class Vision(Node):
         cv_image = self.bridge.compressed_imgmsg_to_cv2(image, desired_encoding='bgr8')
         # Run the model
         if (self.state == State.POSE):
-            results = self.model.predict(cv_image, conf = 0.5, imgsz=320)
+            results = self.model.predict(cv_image, conf = 0.55, imgsz=320)
         else:
             results = self.model.predict(cv_image, classes=[0], verbose=False, conf = 0.5) 
             

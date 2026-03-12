@@ -8,6 +8,10 @@ import math
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 import tf2_geometry_msgs
+from visualization_msgs.msg import Marker
+from rclpy.qos import QoSDurabilityPolicy, QoSProfile
+from ament_index_python.packages import get_package_share_directory
+import os
 
 class Control(Node):
     def __init__(self):
@@ -29,7 +33,7 @@ class Control(Node):
         
         # Timestamp to track the exact moment YOLO last saw you
         self.last_seen_time = self.get_clock().now()
-        self.missing_timeout = 2.0
+        self.missing_timeout = 3.0
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -39,7 +43,7 @@ class Control(Node):
         # Handle for watchdog timer
         self.goal_handle = None
         # Timer for watchdog event
-        self.watchdog_timer = self.create_timer(0.5, self.watchdog_callback)
+        self.watchdog_timer = self.create_timer(0.2, self.watchdog_callback)
 
         # Remember the last know y value (sign) in robot's base_link frame
         self.last_known_y = 0.0
@@ -47,19 +51,27 @@ class Control(Node):
         # Deadband Tracking
         self.last_goal_x = None
         self.last_goal_y = None
-        self.deadband_radius = 0.25  # Require 25cm of movement to update the goal
+        self.deadband_radius = 0.4  # Require 25cm of movement to update the goal
         
         # EMA Tracking in Odom Frame ---
         self.alpha = 0.5  # Smoothing factor (0.0 to 1.0)
         self.ema_person_x = None
         self.ema_person_y = None
 
+        # Create marker to show person position in the map
+        markerQoS = QoSProfile(depth=10, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL)
+        self.marker_pub = self.create_publisher(Marker, 'person_marker', markerQoS)
+
+        # Controls the LED to indicate state (Green = Target Visible, Yellow = Spinning, Red = Lost)
+        self.led_controller = LedControl()
+        
     def person_callback(self, msg):
         self.last_seen_time = self.get_clock().now()
         msg.header.stamp = self.get_clock().now().to_msg()
+        marker_pose = None
 
         try:
-            # 1. Transform the person's pose from the camera's optical frame to the 'odom' frame
+            # Transform the person's pose from the camera's optical frame to the 'odom' frame
             target_frame = 'odom'
             transform_to_odom = self.tf_buffer.lookup_transform(
                 target_frame, 
@@ -79,7 +91,7 @@ class Control(Node):
             # Save the Y coordinate. Positive = Left, Negative = Right.
             self.last_known_y = person_base_link.pose.position.y
             
-            # 2. Get the robot's current position in the 'odom' frame
+            # Get the robot's current position in the 'odom' frame
             robot_transform = self.tf_buffer.lookup_transform(
                 target_frame, 
                 'base_link', 
@@ -99,7 +111,21 @@ class Control(Node):
                 self.ema_person_x = (self.alpha * raw_person_x) + ((1.0 - self.alpha) * self.ema_person_x)
                 self.ema_person_y = (self.alpha * raw_person_y) + ((1.0 - self.alpha) * self.ema_person_y)
             
-            # 3. Calculate distance using the SMOOTHED coordinates
+            # Create a dedicated pose for the marker (person's actual location)
+            marker_pose = PoseStamped()
+            marker_pose.header = person_odom.header
+            marker_pose.pose.position.x = self.ema_person_x
+            marker_pose.pose.position.y = self.ema_person_y
+            marker_pose.pose.position.z = person_odom.pose.position.z
+            marker_pose.pose.orientation.x = 0.0
+            marker_pose.pose.orientation.y = 0.0
+            marker_pose.pose.orientation.z = 0.0
+            marker_pose.pose.orientation.w = 1.0
+
+            # Publish marker immediately so visualization is smooth regardless of nav logic
+            self.marker_publisher(marker_pose)
+
+            # Calculate distance using the SMOOTHED coordinates
             dx = self.ema_person_x - robot_x
             dy = self.ema_person_y - robot_y
             distance = math.hypot(dx, dy)
@@ -107,6 +133,7 @@ class Control(Node):
             if distance < self.follow_distance:
                 self.get_logger().info(f"Robot within {self.follow_distance}m, not moving.")
                 self.get_logger().info(f"Current true distance is {distance:.2f}m.")
+                # TODO use wait behavior tree action
                 return 
                 
             # Calculate the new point exactly follow_distance in front of the person
@@ -145,7 +172,7 @@ class Control(Node):
             self.is_spinning = False
             self.spin_goal_handle = None
 
-        # IMPORTANT: Use person_odom (the new target) to send to the action server!
+        # Use person_odom (the new target) to send to the action server!
         if not self.goal_sent:
             self.get_logger().info("Person detected! Starting pursuit...")
             self.send_nav_goal(person_odom)
@@ -230,20 +257,59 @@ class Control(Node):
             if time_since_seen > self.missing_timeout:
                 self.get_logger().warn(f"Target lost for {time_since_seen:.1f}s! Hijacking Nav2...")
                 
-                # 1. Kill the active navigation goal immediately
+                # Kill the active navigation goal immediately
                 if self.goal_handle:
                     self.goal_handle.cancel_goal_async()
                     self.goal_handle = None
                 
-                # 2. Reset our state so we don't keep firing the watchdog
+                # Reset our state so we don't keep firing the watchdog
                 self.goal_sent = False 
                 self.ema_person_x = None
                 self.ema_person_y = None
                 self.last_goal_x = None
                 self.last_goal_y = None
                 
-                # 3. Start the spin search
+                # Start the spin search
                 self.send_spin_goal()
+
+    def marker_publisher(self, person_odom):
+        marker = Marker()
+        marker.header.frame_id = person_odom.header.frame_id
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.ns = "person marker"
+        marker.id = 0
+        
+        # Robustly check for mesh file, fallback to cylinder if missing
+        try:
+            share_dir = get_package_share_directory('robot_follower')
+            mesh_path = os.path.join(share_dir, 'models', 'low_poly_person.stl')
+            
+            if os.path.exists(mesh_path):
+                marker.type = Marker.MESH_RESOURCE
+                marker.mesh_resource = "package://robot_follower/models/low_poly_person.stl"
+                marker.scale.x = 0.1
+                marker.scale.y = 0.1
+                marker.scale.z = 0.1
+            else:
+                self.get_logger().warn(f"Mesh not found at {mesh_path}. Using Cylinder fallback.")
+                marker.type = Marker.CYLINDER
+                marker.scale.x = 0.5
+                marker.scale.y = 0.5
+                marker.scale.z = 1.8
+        except Exception as e:
+            self.get_logger().warn(f"Could not resolve mesh path: {e}")
+            marker.type = Marker.CYLINDER
+            marker.scale.x = 0.5
+            marker.scale.y = 0.5
+            marker.scale.z = 1.8
+
+        marker.action = Marker.ADD
+        marker.pose = person_odom.pose
+        marker.color.a = 1.0
+        marker.color.r = 0.0
+        marker.color.g = 1.0
+        marker.color.b = 0.0
+        self.marker_pub.publish(marker)
 
 
 def main():
