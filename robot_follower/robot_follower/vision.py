@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 from tf2_ros import TransformBroadcaster, TransformStamped
 from geometry_msgs.msg import PoseStamped
-from robot_follower.led_control import LedControl
+# from robot_follower.led_control import LedControl
 from rclpy.qos import qos_profile_sensor_data
 from scipy.spatial.transform import Rotation as R
 from enum import auto, Enum
@@ -46,7 +46,7 @@ class Vision(Node):
         self.topic = self.get_parameter("topic").get_parameter_value().string_value
         self.depth_topic = self.get_parameter("depth_topic").get_parameter_value().string_value
 
-        self.create_subscription(CompressedImage, self.topic, self.image_callback, 10)
+        self.create_subscription(CompressedImage, self.topic, self.image_callback, qos_profile_sensor_data)
         self.create_subscription(Image, self.depth_topic, self.depth_callback, qos_profile_sensor_data)
         self.image_pub = self.create_publisher(CompressedImage, 'new_image/compressed', 10)
         self.coord_pub = self.create_publisher(RegionOfInterest, 'vision/target_roi', 10)
@@ -60,7 +60,7 @@ class Vision(Node):
             qos_profile_sensor_data)
         self.info_pub = self.create_publisher(CameraInfo, 'new_image/camera_info', 10)
         self.intrinsics = None
-        self.led_controller = LedControl()
+        # self.led_controller = LedControl()
         self.person_tf = self.create_publisher(PoseStamped, 'person_pose', 10)
 
         if current_model.endswith("yolo26n-pose.pt"):
@@ -69,7 +69,7 @@ class Vision(Node):
             self.state = State.OBJECT
         self.get_logger().info(f"State is set to {self.state}")
 
-        # Implment Exponential Moving Average for location values
+        # Implement Exponential Moving Average for location values
         self.declare_parameter("ema_alpha", value=1.0)
         self.alpha = self.get_parameter("ema_alpha").get_parameter_value().double_value
 
@@ -174,14 +174,14 @@ class Vision(Node):
                     raw_y = (center_y - self.intrinsics['cy']) * raw_z / self.intrinsics['fy']
 
                     # 2. Apply the Exponential Moving Average
-                    if self.ema_pose is None:
-                        # First valid frame: initialize the EMA with the raw readings
-                        self.ema_pose = [raw_x, raw_y, raw_z]
-                    else:
-                        # Subsequent frames: calculate the new EMA
-                        self.ema_pose[0] = (self.alpha * raw_x) + ((1.0 - self.alpha) * self.ema_pose[0])
-                        self.ema_pose[1] = (self.alpha * raw_y) + ((1.0 - self.alpha) * self.ema_pose[1])
-                        self.ema_pose[2] = (self.alpha * raw_z) + ((1.0 - self.alpha) * self.ema_pose[2])
+                    # if self.ema_pose is None:
+                    #     # First valid frame: initialize the EMA with the raw readings
+                    self.ema_pose = [raw_x, raw_y, raw_z]
+                    # else:
+                    #     # Subsequent frames: calculate the new EMA
+                    #     self.ema_pose[0] = (self.alpha * raw_x) + ((1.0 - self.alpha) * self.ema_pose[0])
+                    #     self.ema_pose[1] = (self.alpha * raw_y) + ((1.0 - self.alpha) * self.ema_pose[1])
+                    #     self.ema_pose[2] = (self.alpha * raw_z) + ((1.0 - self.alpha) * self.ema_pose[2])
 
                     x_camera, y_camera, z_camera = self.ema_pose
 
@@ -211,14 +211,12 @@ class Vision(Node):
                     person_msg.pose.orientation.z = 0.0
                     person_msg.pose.orientation.w = 1.0
                     self.person_tf.publish(person_msg)
-                    self.led_controller.set_color(LedControl.GREEN, blink_ms=0)
                 else:
                     self.get_logger().warn("Depth value is zero, cannot determine distance.")
-                    self.led_controller.set_color(LedControl.YELLOW, blink_ms=0)
     
             cv2.circle(frame, (center_x, center_y), 5, (0, 255, 0), -1)
-        else:
-                self.led_controller.set_color(LedControl.RED, blink_ms=0)
+        # else:
+        #         self.led_controller.set_color(LedControl.RED, blink_ms=0)
         if self.intrinsics:
             info_msg = CameraInfo()
             info_msg.header = image.header

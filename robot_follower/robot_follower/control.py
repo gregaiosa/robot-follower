@@ -12,6 +12,7 @@ from visualization_msgs.msg import Marker
 from rclpy.qos import QoSDurabilityPolicy, QoSProfile
 from ament_index_python.packages import get_package_share_directory
 import os
+from robot_follower.led_control import LedControl
 
 class Control(Node):
     def __init__(self):
@@ -39,6 +40,7 @@ class Control(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
         self.follow_distance = 1.0
+        self.backup_distance = 0.5
 
         # Handle for watchdog timer
         self.goal_handle = None
@@ -64,11 +66,13 @@ class Control(Node):
 
         # Controls the LED to indicate state (Green = Target Visible, Yellow = Spinning, Red = Lost)
         self.led_controller = LedControl()
-        
+
     def person_callback(self, msg):
         self.last_seen_time = self.get_clock().now()
         msg.header.stamp = self.get_clock().now().to_msg()
         marker_pose = None
+        self.led_controller.set_color(LedControl.GREEN, blink_ms=0)
+
 
         try:
             # Transform the person's pose from the camera's optical frame to the 'odom' frame
@@ -131,10 +135,19 @@ class Control(Node):
             distance = math.hypot(dx, dy)
             
             if distance < self.follow_distance:
-                self.get_logger().info(f"Robot within {self.follow_distance}m, not moving.")
-                self.get_logger().info(f"Current true distance is {distance:.2f}m.")
-                # TODO use wait behavior tree action
-                return 
+                if distance < self.backup_distance:
+                    self.get_logger().warn(f"Too close ({distance:.2f}m)! Backing up...")
+                else:
+                    self.get_logger().info(f"Robot within {self.follow_distance}m, not moving.")
+                    self.get_logger().info(f"Current true distance is {distance:.2f}m.")
+                    
+                    # Stop the robot if it's currently moving
+                    if self.goal_handle and self.goal_sent:
+                        self.get_logger().info("Target close. Cancelling navigation goal...")
+                        self.goal_handle.cancel_goal_async()
+                        self.goal_handle = None
+                        self.goal_sent = False
+                    return 
                 
             # Calculate the new point exactly follow_distance in front of the person
             ratio = (distance - self.follow_distance) / distance
@@ -221,6 +234,7 @@ class Control(Node):
         # Spin 6.28 radians (360 degrees) in the correct direction
         goal_msg.target_yaw = spin_direction * 6.28  
         
+        self.led_controller.set_color(LedControl.YELLOW, blink_ms=0)
         self.is_spinning = True
         self._send_spin_future = self.spin_client.send_goal_async(goal_msg)
         self._send_spin_future.add_done_callback(self.spin_response_callback)
@@ -240,7 +254,7 @@ class Control(Node):
         self.spin_goal_handle = None
         self.get_logger().info("Spin sweep complete. Waiting for target to reappear...")
 
-    async def reset_callback(self, request, response):
+    def reset_callback(self, request, response):
         self.goal_sent = False
         self.is_spinning = False
         self.ema_person_x = None
