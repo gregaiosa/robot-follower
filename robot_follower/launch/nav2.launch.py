@@ -52,6 +52,8 @@ def launch_setup(context, *args, **kwargs):
         SetRemap('base_link', robot_base_frame),
         SetRemap('/' + namespace + '/odom', '/' + namespace + '/platform/odom'),
         SetRemap('map', '/' + namespace + '/map'),
+        SetRemap('/tf', '/' + namespace + '/tf'),
+        SetRemap('/tf_static', '/' + namespace + '/tf_static'),
 
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(launch_nav2),
