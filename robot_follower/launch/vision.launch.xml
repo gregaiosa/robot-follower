@@ -3,6 +3,8 @@
     <arg name="topic" default="/j100_0076/sensors/camera_0/color/compressed" description="Image topic for YOLO"/>
     <arg name="camera" default="false" description="Whether to launch the camera node"/>
     <arg name="depth_topic" default="/j100_0076/sensors/camera_0/depth/image" description="Camera depth topic"/>
+    <arg name="use_rviz" default="true" description="Controls whether Rviz is launched"/>
+    <arg name="use_sim_time" default="false" description="Use simulation (Gazebo) clock if true"/>
 
     <node pkg="robot_follower" exec="vision" name="vision">
         <param name="model" value="$(find-pkg-share robot_follower)/models/$(var model)"/>
@@ -30,4 +32,10 @@
         <arg name="hole_filling_filter.enable" value="true" />
         <arg name="align_depth.enable" value="true" />
     </include>
+
+    <node pkg="rviz2" exec="rviz2" name="rviz2" namespace="/j100_0076" args="-d $(find-pkg-share robot_follower)/config/nav2.rviz" if="$(var use_rviz)">
+        <param name="use_sim_time" value="$(var use_sim_time)"/>
+        <remap from="/tf" to="tf"/>
+        <remap from="/tf_static" to="tf_static"/>
+    </node>
 </launch>
