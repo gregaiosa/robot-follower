@@ -63,7 +63,7 @@ class Vision(Node):
         # self.led_controller = LedControl()
         self.person_tf = self.create_publisher(PoseStamped, 'person_pose', 10)
 
-        if current_model.endswith("yolo26n-pose.pt"):
+        if current_model.endswith("yolo26n-pose.pt") or current_model.endswith("yolo26n-pose.onnx"):
             self.state = State.POSE
         else:
             self.state = State.OBJECT
@@ -75,6 +75,11 @@ class Vision(Node):
 
         # Store the current filtered pose [x, y, z]
         self.ema_pose = None
+
+        # Ensure a detection is consistent for a few frames before trusting it (helps with YOLO jitter)
+        self.declare_parameter("required_streak", value=4)
+        self.required_streak = self.get_parameter("required_streak").get_parameter_value().integer_value
+        self.detection_streak = 0
 
     def info_callback(self, msg):
         self.intrinsics = {
@@ -90,7 +95,7 @@ class Vision(Node):
         cv_image = self.bridge.compressed_imgmsg_to_cv2(image, desired_encoding='bgr8')
         # Run the model
         if (self.state == State.POSE):
-            results = self.model.predict(cv_image, conf = 0.55, imgsz=320)
+            results = self.model.predict(cv_image, conf = 0.6, imgsz=320)
         else:
             results = self.model.predict(cv_image, classes=[0], verbose=False, conf = 0.5) 
             
@@ -168,6 +173,8 @@ class Vision(Node):
                 
                 if depth_mm > 0:
 
+                    
+
                     # 1. Calculate the RAW 3D coordinates for this specific frame
                     raw_z = depth_mm / 1000.0  # Convert to meters
                     raw_x = (center_x - self.intrinsics['cx']) * raw_z / self.intrinsics['fx']
@@ -185,7 +192,7 @@ class Vision(Node):
 
                     x_camera, y_camera, z_camera = self.ema_pose
 
-                    self.get_logger().info(f"Depth at center: {z_camera:.2f} m")
+                    self.get_logger().debug(f"Depth at center: {z_camera:.2f} m")
                     tf_cam_person = TransformStamped()
                     # tf_cam_person.header.stamp = image.header.stamp 
                     tf_cam_person.header.stamp = self.get_clock().now().to_msg()
@@ -199,7 +206,7 @@ class Vision(Node):
                     tf_cam_person.transform.rotation.y = -.707
                     tf_cam_person.transform.rotation.z = 0.0
                     tf_cam_person.transform.rotation.w = .707
-                    self.broadcaster.sendTransform(tf_cam_person)
+                    
                     person_msg = PoseStamped()
                     person_msg.header.stamp = tf_cam_person.header.stamp
                     person_msg.header.frame_id = tf_cam_person.header.frame_id
@@ -210,13 +217,24 @@ class Vision(Node):
                     person_msg.pose.orientation.y = 0.0
                     person_msg.pose.orientation.z = 0.0
                     person_msg.pose.orientation.w = 1.0
-                    self.person_tf.publish(person_msg)
-                else:
-                    self.get_logger().warn("Depth value is zero, cannot determine distance.")
+
+                    if depth_mm > 0:
+                        self.detection_streak += 1
+        
+                        if self.detection_streak >= self.required_streak:
+                        # Detection is confirmed real — publish
+                            self.person_tf.publish(person_msg)
+                            self.broadcaster.sendTransform(tf_cam_person)
+                            self.person_tf.publish(person_msg)
+                        else:
+                            self.get_logger().warn("Depth value is zero, cannot determine distance.")
     
             cv2.circle(frame, (center_x, center_y), 5, (0, 255, 0), -1)
-        # else:
+        else:
         #         self.led_controller.set_color(LedControl.RED, blink_ms=0)
+            # Reset streak on any missed frame
+            self.detection_streak = 0
+            self.ema_pose = None  # also reset EMA so stale pose doesn't persist
         if self.intrinsics:
             info_msg = CameraInfo()
             info_msg.header = image.header
