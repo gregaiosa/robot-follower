@@ -133,7 +133,8 @@ class Control(Node):
             dx = self.ema_person_x - robot_x
             dy = self.ema_person_y - robot_y
             distance = math.hypot(dx, dy)
-            
+
+            self.get_logger().info(f"Current true distance is {distance:.2f}m.")
             if distance < self.follow_distance:
                 if distance < self.backup_distance:
                     self.get_logger().warn(f"Too close ({distance:.2f}m)! Backing up...")
@@ -154,6 +155,15 @@ class Control(Node):
             
             new_goal_x = robot_x + (dx * ratio)
             new_goal_y = robot_y + (dy * ratio)
+
+            goal_distance_from_robot = math.hypot(new_goal_x - robot_x, new_goal_y - robot_y)
+            if goal_distance_from_robot < 0.3:
+            # Goal is too close, just stop navigation and wait
+                if self.goal_handle and self.goal_sent:
+                    self.goal_handle.cancel_goal_async()
+                    self.goal_handle = None
+                    self.goal_sent = False
+                return
 
             # Deadband Logic (Don't spam MPPI if the goal hasn't moved much) ---
             if self.goal_sent and self.last_goal_x is not None:
@@ -266,7 +276,8 @@ class Control(Node):
 
     def watchdog_callback(self):
         # Only run the check if we are actively following and NOT already spinning
-        if self.goal_sent and not self.is_spinning:
+        # if self.goal_sent and not self.is_spinning:
+        if not self.is_spinning:
             time_since_seen = (self.get_clock().now() - self.last_seen_time).nanoseconds / 1e9
             
             if time_since_seen > self.missing_timeout:
