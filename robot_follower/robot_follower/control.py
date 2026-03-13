@@ -191,6 +191,7 @@ class Control(Node):
             self.send_nav_goal(person_odom)
             self.goal_sent = True
         else:
+            person_odom.header.stamp = self.get_clock().now().to_msg()
             self.goal_update_pub.publish(person_odom)
             self.get_logger().info("Path updated!")
 
