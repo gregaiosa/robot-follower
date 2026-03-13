@@ -1,0 +1,10 @@
+<launch>
+    <arg name="use_rviz" default="true" description="Controls whether Rviz is launched"/>
+    <arg name="use_sim_time" default="false" description="Use simulation (Gazebo) clock if true"/>
+
+    <node pkg="rviz2" exec="rviz2" name="rviz2" namespace="/j100_0076" args="-d $(find-pkg-share robot_follower)/config/nav2.rviz" if="$(var use_rviz)">
+        <param name="use_sim_time" value="$(var use_sim_time)"/>
+        <remap from="/tf" to="tf"/>
+        <remap from="/tf_static" to="tf_static"/>
+    </node>
+</launch>
