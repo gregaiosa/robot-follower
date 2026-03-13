@@ -77,9 +77,11 @@ class Vision(Node):
         self.ema_pose = None
 
         # Ensure a detection is consistent for a few frames before trusting it (helps with YOLO jitter)
+        self.detection_streak = 0
+        self.missed_frames = 0
         self.declare_parameter("required_streak", value=4)
         self.required_streak = self.get_parameter("required_streak").get_parameter_value().integer_value
-        self.detection_streak = 0
+        self.max_missed_frames = 3
 
     def info_callback(self, msg):
         self.intrinsics = {
@@ -219,22 +221,24 @@ class Vision(Node):
                     person_msg.pose.orientation.w = 1.0
 
                     if depth_mm > 0:
+                        self.missed_frames = 0
                         self.detection_streak += 1
-        
+
                         if self.detection_streak >= self.required_streak:
-                        # Detection is confirmed real — publish
                             self.person_tf.publish(person_msg)
                             self.broadcaster.sendTransform(tf_cam_person)
-                            self.person_tf.publish(person_msg)
-                        else:
-                            self.get_logger().warn("Depth value is zero, cannot determine distance.")
+
+                    else:
+                        self.get_logger().warn("Depth value is zero, cannot determine distance.")
     
             cv2.circle(frame, (center_x, center_y), 5, (0, 255, 0), -1)
         else:
-        #         self.led_controller.set_color(LedControl.RED, blink_ms=0)
+            self.missed_frames += 1
             # Reset streak on any missed frame
-            self.detection_streak = 0
-            self.ema_pose = None  # also reset EMA so stale pose doesn't persist
+            if self.missed_frames > self.max_missed_frames:
+                self.detection_streak = 0
+                self.ema_pose = None
+
         if self.intrinsics:
             info_msg = CameraInfo()
             info_msg.header = image.header

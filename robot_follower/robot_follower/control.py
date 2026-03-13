@@ -13,6 +13,7 @@ from rclpy.qos import QoSDurabilityPolicy, QoSProfile
 from ament_index_python.packages import get_package_share_directory
 import os
 from robot_follower.led_control import LedControl
+from action_msgs.msg import GoalStatus
 
 class Control(Node):
     def __init__(self):
@@ -32,10 +33,6 @@ class Control(Node):
         self.is_spinning = False
         self.spin_goal_handle = None
         
-        # Timestamp to track the exact moment YOLO last saw you
-        self.last_seen_time = self.get_clock().now()
-        self.missing_timeout = 3.0
-
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
@@ -46,6 +43,18 @@ class Control(Node):
         self.goal_handle = None
         # Timer for watchdog event
         self.watchdog_timer = self.create_timer(0.2, self.watchdog_callback)
+
+        # Variables for progress tracking
+        self.last_known_person_odom_x = None
+        self.last_known_person_odom_y = None
+        self.progress_check_interval = 1.0  # check progress every 1 second
+        self.min_progress_distance = 0.2    # must close 20cm per second to count as progress
+        self.last_robot_x = None
+        self.last_robot_y = None
+        self.missing_timeout = 6.0          # raise the hard timeout as a fallback
+        self.no_progress_timeout = 2.0      # spin sooner if not making progress
+        self.lost_and_no_progress_time = None
+        self.last_seen_time = None  # None means "never seen yet"
 
         # Remember the last know y value (sign) in robot's base_link frame
         self.last_known_y = 0.0
@@ -225,17 +234,22 @@ class Control(Node):
         self.get_result_future.add_done_callback(self.nav_result_callback)
 
     def nav_result_callback(self, future):
-        # The goal finished normally, was aborted, or was cancelled by our watchdog
+        result = future.result()
         self.goal_sent = False
         self.goal_handle = None
-        # Reset EMA and Deadband so it doesn't jump weirdly when acquiring a new target
-        self.ema_person_x = None
-        self.ema_person_y = None
-        self.last_goal_x = None
-        self.last_goal_y = None
+
+        # Only reset EMA on genuine completion/abort, not cancellation
+        if result.status != GoalStatus.STATUS_CANCELED:
+            self.ema_person_x = None
+            self.ema_person_y = None
+            self.last_goal_x = None
+            self.last_goal_y = None
 
     def send_spin_goal(self):
-        self.spin_client.wait_for_server()
+        if not self.spin_client.server_is_ready():
+            self.get_logger().warn("Spin server not ready, skipping spin.")
+            return
+            
         goal_msg = Spin.Goal()
         
         # If last_known_y is positive (left), multiply by 1.0 (Spin CCW)
@@ -275,28 +289,98 @@ class Control(Node):
         return response
 
     def watchdog_callback(self):
-        # Only run the check if we are actively following and NOT already spinning
-        # if self.goal_sent and not self.is_spinning:
-        if not self.is_spinning:
-            time_since_seen = (self.get_clock().now() - self.last_seen_time).nanoseconds / 1e9
-            
+        if self.is_spinning:
+            return
+
+        if self.last_seen_time is None:
+            return
+
+        time_since_seen = (self.get_clock().now() - self.last_seen_time).nanoseconds / 1e9
+
+        if time_since_seen <= 0.5:
+            # Recently saw person, reset progress tracking
+            self.lost_and_no_progress_time = None
+            return
+
+        # Person is lost — check if the robot is making progress toward last known position
+        if self.last_known_person_odom_x is None:
+            # No known position to navigate toward, spin immediately
             if time_since_seen > self.missing_timeout:
-                self.get_logger().warn(f"Target lost for {time_since_seen:.1f}s! Hijacking Nav2...")
-                
-                # Kill the active navigation goal immediately
-                if self.goal_handle:
-                    self.goal_handle.cancel_goal_async()
-                    self.goal_handle = None
-                
-                # Reset our state so we don't keep firing the watchdog
-                self.goal_sent = False 
-                self.ema_person_x = None
-                self.ema_person_y = None
-                self.last_goal_x = None
-                self.last_goal_y = None
-                
-                # Start the spin search
-                self.send_spin_goal()
+                self._trigger_spin()
+            return
+
+        try:
+            robot_transform = self.tf_buffer.lookup_transform(
+                'odom', 'base_link', rclpy.time.Time()
+            )
+            robot_x = robot_transform.transform.translation.x
+            robot_y = robot_transform.transform.translation.y
+
+            dist_to_last_known = math.hypot(
+                self.last_known_person_odom_x - robot_x,
+                self.last_known_person_odom_y - robot_y
+            )
+
+            # If robot is already close to last known position, spin — 
+            # we've arrived but still don't see them
+            if dist_to_last_known < 0.5:
+                self.get_logger().info("Reached last known position, no target found. Spinning...")
+                self._trigger_spin()
+                return
+
+            # Check if robot is closing the distance (making progress)
+            making_progress = False
+            if self.last_robot_x is not None:
+                dist_moved_toward_target = math.hypot(
+                    robot_x - self.last_robot_x,
+                    robot_y - self.last_robot_y
+                )
+                if dist_moved_toward_target > self.min_progress_distance:
+                    making_progress = True
+                    self.lost_and_no_progress_time = None  # reset no-progress clock
+
+            self.last_robot_x = robot_x
+            self.last_robot_y = robot_y
+
+            if not making_progress:
+                if self.lost_and_no_progress_time is None:
+                    self.lost_and_no_progress_time = self.get_clock().now()
+                else:
+                    no_progress_duration = (
+                        self.get_clock().now() - self.lost_and_no_progress_time
+                    ).nanoseconds / 1e9
+                    if no_progress_duration > self.no_progress_timeout:
+                        self.get_logger().warn(
+                            f"Lost target and no progress for {no_progress_duration:.1f}s. Spinning..."
+                        )
+                        self._trigger_spin()
+                        return
+
+            # Hard fallback — spin regardless after long enough
+            if time_since_seen > self.missing_timeout:
+                self.get_logger().warn(f"Hard timeout reached ({time_since_seen:.1f}s). Spinning...")
+                self._trigger_spin()
+
+        except Exception as e:
+            self.get_logger().warn(f"Watchdog TF lookup failed: {e}")
+            if time_since_seen > self.missing_timeout:
+                self._trigger_spin()
+
+
+    def _trigger_spin(self):
+        if self.goal_handle and self.goal_sent:
+            self.goal_handle.cancel_goal_async()
+            self.goal_handle = None
+
+        self.goal_sent = False
+        self.ema_person_x = None
+        self.ema_person_y = None
+        self.last_goal_x = None
+        self.last_goal_y = None
+        self.lost_and_no_progress_time = None
+        self.last_robot_x = None
+        self.last_robot_y = None
+        self.send_spin_goal()
 
     def marker_publisher(self, person_odom):
         marker = Marker()
