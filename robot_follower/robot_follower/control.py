@@ -24,7 +24,7 @@ class Control(Node):
         self.spin_client = ActionClient(self, Spin, '/j100_0076/spin')
         
         # Publishers and Subscribers
-        self.goal_update_pub = self.create_publisher(PoseStamped, '/j100_0076/goal_update', 10)
+        self.goal_update_pub = self.create_publisher(PoseStamped, '/j100_0076/goal_update', 1)
         self.person_sub = self.create_subscription(PoseStamped, '/person_pose', self.person_callback, 10)
         self.reset_service = self.create_service(Empty, 'reset', self.reset_callback)
         
@@ -189,10 +189,15 @@ class Control(Node):
             person_odom.pose.position.y = new_goal_y
             
             # Force the robot to rotate to face the person
-            yaw = math.atan2(dy, dx)
-            person_odom.pose.orientation.z = math.sin(yaw / 2.0)
-            person_odom.pose.orientation.w = math.cos(yaw / 2.0)
-            
+            # yaw = math.atan2(dy, dx)
+            # person_odom.pose.orientation.z = math.sin(yaw / 2.0)
+            # person_odom.pose.orientation.w = math.cos(yaw / 2.0)
+            # Replace the yaw calculation with:
+            person_odom.pose.orientation.x = 0.0
+            person_odom.pose.orientation.y = 0.0
+            person_odom.pose.orientation.z = 0.0
+            person_odom.pose.orientation.w = 1.0
+
         except Exception as e:
             self.get_logger().warn(f"TF lookup failed: {e}")
             return
