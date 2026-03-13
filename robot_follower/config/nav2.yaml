@@ -42,7 +42,7 @@ controller_server:
       plugin: "nav2_mppi_controller::MPPIController"
       time_steps: 32
       model_dt: 0.05
-      batch_size: 1000
+      batch_size: 2000
       ax_max: 1.5
       ax_min: -1.5
       ay_max: 6.0
@@ -142,7 +142,7 @@ local_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 8.0
-        inflation_radius: 0.36
+        inflation_radius: 0.25
       voxel_layer:
         plugin: "nav2_costmap_2d::VoxelLayer"
         enabled: true
