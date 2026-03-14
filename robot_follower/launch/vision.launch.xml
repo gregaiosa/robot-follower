@@ -12,6 +12,13 @@
 	    <param name="depth_topic" value="$(var depth_topic)"/>
 	    <remap from="/tf" to="/j100_0076/tf"/>
         <remap from="/tf_static" to="/j100_0076/tf_static"/>
+        <param name="hand_model" value="$(find-pkg-share robot_follower)/models/hand_pose.onnx"/>
+        <!-- <param name="hand_model" value="$(find-pkg-share robot_follower)/models/hand_pose_openvino_model/"/> -->
+        <!-- <param name="hand_model" value="$(find-pkg-share robot_follower)/models/hand_pose_ncnn_model/"/> -->
+        <!-- <param name="hand_model" value="$(find-pkg-share robot_follower)/models/hand_pose.pt"/> -->
+
+
+        
     </node>
 
     <node pkg="robot_follower" exec="control" name="control">

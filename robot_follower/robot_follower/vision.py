@@ -27,6 +27,9 @@ class Vision(Node):
         self.declare_parameter("model",
                                value="best.pt")
         self.model = YOLO(self.get_parameter("model").get_parameter_value().string_value)
+        self.declare_parameter("hand_model", value="hand_pose.pt")
+        hand_model_path = self.get_parameter("hand_model").get_parameter_value().string_value
+        self.hand_model = YOLO(hand_model_path)
 
         # 1. Save the string value to a variable
         current_model = self.get_parameter("model").get_parameter_value().string_value
@@ -40,7 +43,8 @@ class Vision(Node):
         #                        value="/camera/camera/aligned_depth_to_color/image_raw")
         # self.declare_parameter("depth_topic",
         #                        value="/j100_0076/sensors/camera_0/depth/image")
-        self.declare_parameter("depth_topic", value="/j100_0076/sensors/camera_0/depth/image")
+        # self.declare_parameter("depth_topic", value="/j100_0076/sensors/camera_0/depth/image")
+        self.declare_parameter("depth_topic", value="/j100_0076/sensors/camera_0/aligned_depth_to_color/image")
         # self.declare_parameter("topic",
         #                        value="/j100_0076/sensors/camera_0/color/compressed")
         self.topic = self.get_parameter("topic").get_parameter_value().string_value
@@ -53,11 +57,16 @@ class Vision(Node):
 
         self.broadcaster = TransformBroadcaster(self)
         self.latest_depth_array = None
+        # self.info_sub = self.create_subscription(
+        #     CameraInfo, 
+        #     '/j100_0076/sensors/camera_0/depth/camera_info',
+        #     self.info_callback,
+        #     qos_profile_sensor_data)
         self.info_sub = self.create_subscription(
-            CameraInfo, 
-            '/j100_0076/sensors/camera_0/depth/camera_info',
-            self.info_callback,
-            qos_profile_sensor_data)
+                    CameraInfo, 
+                    '/j100_0076/sensors/camera_0/aligned_depth_to_color/camera_info',
+                    self.info_callback,
+                    qos_profile_sensor_data)
         self.info_pub = self.create_publisher(CameraInfo, 'new_image/camera_info', 10)
         self.intrinsics = None
         # self.led_controller = LedControl()
@@ -139,7 +148,59 @@ class Vision(Node):
                     for result in results:
                         # Grab the keypoints for this specific person
                         # xy[0] extracts the array of keypoints for the first detected person
-                        keypoints = result.keypoints.xy[0].cpu().numpy() 
+                        keypoints = result.keypoints.data[0].cpu().numpy() 
+
+                        # Get the crop box for the right arm
+                        box = self.get_hand_crop_box(keypoints, cv_image.shape, side="right", scale_factor=1.5)
+
+                        if box:
+                            x1, y1, x2, y2 = box
+
+                            # 3. Get the raw crop
+                            raw_crop = cv_image[y1:y2, x1:x2]
+
+                            # --- THE ULTIMATE EXPORT BYPASS ---
+                            # Manually pad the crop to a perfect square with gray pixels (YOLO standard)
+                            h_crop, w_crop = raw_crop.shape[:2]
+                            max_side = max(h_crop, w_crop)
+
+                            pad_top = (max_side - h_crop) // 2
+                            pad_bottom = max_side - h_crop - pad_top
+                            pad_left = (max_side - w_crop) // 2
+                            pad_right = max_side - w_crop - pad_left
+
+                            square_crop = cv2.copyMakeBorder(raw_crop, pad_top, pad_bottom, pad_left, pad_right, cv2.BORDER_CONSTANT, value=(114, 114, 114))
+
+                            # Resize it to exactly the size OpenVINO expects
+                            ready_crop = cv2.resize(square_crop, (256, 256))
+
+                            # Draw the blue rectangle showing where we cropped on the main frame
+                            cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
+
+                            # 4. Run the OpenVINO model
+                            # CRITICAL: Pass imgsz=256 so Ultralytics doesn't try to alter the image
+                            hand_results = self.hand_model.predict(ready_crop, conf=0.15, imgsz=256, verbose=False)
+
+                            if hand_results[0].keypoints is not None and len(hand_results[0].keypoints.data) > 0:                                # Get the gesture class name and confidence
+                                # Extract the [21, 3] array of hand keypoints
+                                hand_kpts = hand_results[0].keypoints.data[0].cpu().numpy()
+
+                                # 5. Pass them to our custom logic function
+                                gesture_name = self.recognize_gesture(hand_kpts)
+
+                                # 6. Map the text back to the MAIN frame, right above the crop box
+                                label = f"Gesture: {gesture_name}"
+                                cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+                                # Only log when it's a recognized command to prevent console spam
+                                if gesture_name != "Unknown":
+                                    self.get_logger().info(f"Robot sees command: {gesture_name}")
+                                # Optional: If you want to draw the hand bounding box from the crop 
+                                # back onto the main image, you have to add x1 and y1 to the coordinates!
+                                # hand_bbox = hand_results[0].boxes.xyxy[0].cpu().numpy()
+                                # hand_x1, hand_y1 = int(hand_bbox[0]) + x1, int(hand_bbox[1]) + y1
+                                # hand_x2, hand_y2 = int(hand_bbox[2]) + x1, int(hand_bbox[3]) + y1
+                                # cv2.rectangle(frame, (hand_x1, hand_y1), (hand_x2, hand_y2), (0, 255, 255), 2)
                         
                         # Now iterate through each individual keypoint
                         for kp in keypoints:
@@ -199,7 +260,8 @@ class Vision(Node):
                     # tf_cam_person.header.stamp = image.header.stamp 
                     tf_cam_person.header.stamp = self.get_clock().now().to_msg()
                     # tf_msg.header.frame_id = "camera_0_link"
-                    tf_cam_person.header.frame_id = "camera_0_depth_optical_frame"
+                    # tf_cam_person.header.frame_id = "camera_0_depth_optical_frame"
+                    tf_cam_person.header.frame_id = "camera_0_color_optical_frame"
                     tf_cam_person.child_frame_id = "person"
                     tf_cam_person.transform.translation.x = x_camera
                     tf_cam_person.transform.translation.y = y_camera
@@ -251,6 +313,121 @@ class Vision(Node):
     def depth_callback(self, depth_image):
         depth_image = self.bridge.imgmsg_to_cv2(depth_image, desired_encoding='passthrough')
         self.latest_depth_array = np.array(depth_image, dtype=np.uint16)
+
+    def get_hand_crop_box(self, keypoints, img_shape, side="right", scale_factor=1.5):
+        """
+        Calculates a dynamic bounding box for a hand based on elbow and wrist keypoints.
+        
+        Args:
+            keypoints: The keypoints array from YOLO results (shape: [17, 3] for x, y, conf).
+            img_shape: Tuple of (height, width) of the original image.
+            side: "right" or "left" arm.
+            scale_factor: Multiplier for the forearm length to determine box size.
+            
+        Returns:
+            Tuple of (x1, y1, x2, y2) for the bounding box, or None if keypoints are hidden.
+        """
+        # 1. Map COCO indices for the chosen arm
+        if side == "right":
+            elbow_idx, wrist_idx = 8, 10
+        else:
+            elbow_idx, wrist_idx = 7, 9
+
+        # 2. Extract x, y, and confidence score
+        elbow = keypoints[elbow_idx]
+        wrist = keypoints[wrist_idx]
+
+        # 3. Check if the model is confident it actually sees the arm
+        if elbow[2] < 0.5 or wrist[2] < 0.5:
+            return None  # Arm is likely occluded or out of frame
+
+        # 4. Calculate the distance (forearm length)
+        dx = wrist[0] - elbow[0]
+        dy = wrist[1] - elbow[1]
+        arm_length = np.sqrt(dx**2 + dy**2)
+
+        # 5. Determine the box size
+        box_size = arm_length * scale_factor
+        half_size = box_size / 2
+
+        # 6. Shift the center slightly forward from the wrist 
+        # (The hand is usually an extension of the arm, not exactly ON the wrist)
+        if arm_length > 0:
+            center_x = wrist[0] + (dx / arm_length) * (arm_length * 0.2)
+            center_y = wrist[1] + (dy / arm_length) * (arm_length * 0.2)
+        else:
+            center_x, center_y = wrist[0], wrist[1]
+
+        # 7. Calculate the corners of the bounding box
+        x1 = int(center_x - half_size)
+        y1 = int(center_y - half_size)
+        x2 = int(center_x + half_size)
+        y2 = int(center_y + half_size)
+
+        # Find the largest side to force a perfect square
+        box_width = x2 - x1
+        box_height = y2 - y1
+        max_side = max(box_width, box_height)
+        
+        # Re-center the square perfectly over the wrist
+        x1_sq = int(center_x - (max_side / 2))
+        y1_sq = int(center_y - (max_side / 2))
+        x2_sq = int(center_x + (max_side / 2))
+        y2_sq = int(center_y + (max_side / 2))
+
+        # 8. Clamp the coordinates to the image dimensions (prevents crashing if hand is at the edge)
+        h, w = img_shape[:2]
+        x1 = max(0, x1_sq)
+        y1 = max(0, y1_sq)
+        x2 = min(w, x2_sq)
+        y2 = min(h, y2_sq)
+
+        # 9. Verify the box is valid
+        if x2 <= x1 or y2 <= y1:
+            return None
+
+        return (x1, y1, x2, y2)
+
+    def recognize_gesture(self, keypoints):
+        """
+        Determines the gesture based on 21 hand keypoints.
+        Assumes standard 21-point layout (0=wrist, 4=thumb tip, 8=index tip, 12=middle tip, 16=ring tip, 20=pinky tip).
+        """
+        # Make sure we actually have 21 points
+        if len(keypoints) < 21:
+            return "Unknown"
+
+        # Extract X,Y coordinates (ignore confidence score for the math)
+        wrist = keypoints[0][:2]
+        
+        # Indices for the base knuckle (MCP) and tip of each finger
+        # (Index, Middle, Ring, Pinky)
+        fingers = [(5, 8), (9, 12), (13, 16), (17, 20)]
+        
+        extended_fingers = 0
+        
+        for base_idx, tip_idx in fingers:
+            base_kpt = keypoints[base_idx][:2]
+            tip_kpt = keypoints[tip_idx][:2]
+            
+            # Calculate Euclidean distances from the wrist
+            dist_to_base = np.linalg.norm(wrist - base_kpt)
+            dist_to_tip = np.linalg.norm(wrist - tip_kpt)
+            
+            # If the tip is much further from the wrist than the base knuckle, it's extended
+            if dist_to_tip > dist_to_base * 1.3: 
+                extended_fingers += 1
+
+        # Classify based on how many fingers are up
+        if extended_fingers >= 1:
+            return "Stop (Open Hand)"
+        elif extended_fingers == 0:
+            return "Fist (Go)"
+        # elif extended_fingers == 1 or extended_fingers == 2:
+        #     # You can get fancy here later (e.g., checking if specifically the index finger is up)
+        #     return "Pointing"
+        else:
+            return "Unknown"
 
 def main():
     rclpy.init()
