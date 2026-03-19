@@ -19,6 +19,7 @@ ARGUMENTS = [
 def launch_setup(context, *args, **kwargs):
     pkg_clearpath_nav2_demos = get_package_share_directory('clearpath_nav2_demos')
     pkg_nav2_bringup = get_package_share_directory('nav2_bringup')
+    pkg_robot_follower = get_package_share_directory('robot_follower')
 
     use_sim_time = LaunchConfiguration('use_sim_time')
     setup_path = LaunchConfiguration('setup_path')
@@ -34,7 +35,7 @@ def launch_setup(context, *args, **kwargs):
     if len(eval_scan_topic) == 0:
         eval_scan_topic = f'/{namespace}/sensors/lidar2d_0/scan'
 
-    file_parameters = PathJoinSubstitution([pkg_clearpath_nav2_demos, 'config', platform_model, 'nav2.yaml'])
+    file_parameters = PathJoinSubstitution([pkg_robot_follower, 'config', 'nav2.yaml'])
 
     rewritten_parameters = RewrittenYaml(
         source_file=file_parameters,

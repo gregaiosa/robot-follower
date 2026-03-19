@@ -1,0 +1,13 @@
+<launch>
+    <group>
+        <set_remap from="/tf" to="/j100_0076/tf"/>
+        <set_remap from="/tf_static" to="/j100_0076/tf_static"/>
+
+        <include file="$(find-pkg-share robot_follower)/launch/slam.launch.py">
+            <arg name="scan_topic" value="/scanner/scan"/>
+            <arg name="use_namespace" value="False"/>
+        </include>
+
+        <include file="$(find-pkg-share pointcloud_to_laserscan)/launch/sample_pointcloud_to_laserscan_launch.py"/>
+    </group>
+</launch>

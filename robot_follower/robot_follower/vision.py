@@ -52,7 +52,7 @@ class Vision(Node):
 
         self.create_subscription(CompressedImage, self.topic, self.image_callback, qos_profile_sensor_data)
         self.create_subscription(Image, self.depth_topic, self.depth_callback, qos_profile_sensor_data)
-        self.image_pub = self.create_publisher(CompressedImage, 'new_image/compressed', 10)
+        self.image_pub = self.create_publisher(CompressedImage, 'vision/image/compressed', 10)
         self.coord_pub = self.create_publisher(RegionOfInterest, 'vision/target_roi', 10)
 
         self.broadcaster = TransformBroadcaster(self)
@@ -67,7 +67,7 @@ class Vision(Node):
                     '/j100_0076/sensors/camera_0/aligned_depth_to_color/camera_info',
                     self.info_callback,
                     qos_profile_sensor_data)
-        self.info_pub = self.create_publisher(CameraInfo, 'new_image/camera_info', 10)
+        self.info_pub = self.create_publisher(CameraInfo, 'vision/camera_info', 10)
         self.intrinsics = None
         # self.led_controller = LedControl()
         self.person_tf = self.create_publisher(PoseStamped, 'person_pose', 10)
@@ -142,97 +142,63 @@ class Vision(Node):
                 if self.state == State.OBJECT:
                     depth_mm = self.latest_depth_array[center_y, center_x]
                 elif self.state == State.POSE:
-                    min_dist = 1e9
-                    best_x, best_y = 0, 0
+                    valid_depths = []
                     
                     for result in results:
-                        # Grab the keypoints for this specific person
-                        # xy[0] extracts the array of keypoints for the first detected person
-                        keypoints = result.keypoints.data[0].cpu().numpy() 
+                        keypoints = result.keypoints.data[0].cpu().numpy()
 
-                        # Get the crop box for the right arm
+                        # Get the crop box for the right arm 
                         box = self.get_hand_crop_box(keypoints, cv_image.shape, side="right", scale_factor=1.5)
 
                         if box:
                             x1, y1, x2, y2 = box
-
-                            # 3. Get the raw crop
                             raw_crop = cv_image[y1:y2, x1:x2]
-
-                            # --- THE ULTIMATE EXPORT BYPASS ---
-                            # Manually pad the crop to a perfect square with gray pixels (YOLO standard)
                             h_crop, w_crop = raw_crop.shape[:2]
                             max_side = max(h_crop, w_crop)
-
                             pad_top = (max_side - h_crop) // 2
                             pad_bottom = max_side - h_crop - pad_top
                             pad_left = (max_side - w_crop) // 2
                             pad_right = max_side - w_crop - pad_left
-
                             square_crop = cv2.copyMakeBorder(raw_crop, pad_top, pad_bottom, pad_left, pad_right, cv2.BORDER_CONSTANT, value=(114, 114, 114))
-
-                            # Resize it to exactly the size OpenVINO expects
                             ready_crop = cv2.resize(square_crop, (256, 256))
-
-                            # Draw the blue rectangle showing where we cropped on the main frame
+                            
                             cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
-
-                            # 4. Run the OpenVINO model
-                            # CRITICAL: Pass imgsz=256 so Ultralytics doesn't try to alter the image
                             hand_results = self.hand_model.predict(ready_crop, conf=0.15, imgsz=256, verbose=False)
 
-                            if hand_results[0].keypoints is not None and len(hand_results[0].keypoints.data) > 0:                                # Get the gesture class name and confidence
-                                # Extract the [21, 3] array of hand keypoints
+                            if hand_results[0].keypoints is not None and len(hand_results[0].keypoints.data) > 0:
                                 hand_kpts = hand_results[0].keypoints.data[0].cpu().numpy()
-
-                                # 5. Pass them to our custom logic function
                                 gesture_name = self.recognize_gesture(hand_kpts)
-
-                                # 6. Map the text back to the MAIN frame, right above the crop box
                                 label = f"Gesture: {gesture_name}"
                                 cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-
-                                # Only log when it's a recognized command to prevent console spam
                                 if gesture_name != "Unknown":
                                     self.get_logger().info(f"Robot sees command: {gesture_name}")
-                                # Optional: If you want to draw the hand bounding box from the crop 
-                                # back onto the main image, you have to add x1 and y1 to the coordinates!
-                                # hand_bbox = hand_results[0].boxes.xyxy[0].cpu().numpy()
-                                # hand_x1, hand_y1 = int(hand_bbox[0]) + x1, int(hand_bbox[1]) + y1
-                                # hand_x2, hand_y2 = int(hand_bbox[2]) + x1, int(hand_bbox[3]) + y1
-                                # cv2.rectangle(frame, (hand_x1, hand_y1), (hand_x2, hand_y2), (0, 255, 255), 2)
-                        
-                        # Now iterate through each individual keypoint
+
+                        # Collect all valid keypoint depths instead of taking minimum
                         for kp in keypoints:
                             X = int(kp[0])
                             Y = int(kp[1])
-                            
-                            # Skip keypoints YOLO couldn't see (it sets them to 0,0)
                             if X == 0 and Y == 0:
                                 continue
-                                
-                            # Constrain X and Y to the actual image dimensions to prevent indexing errors
                             height, width = self.latest_depth_array.shape
                             X = max(0, min(X, width - 1))
                             Y = max(0, min(Y, height - 1))
-                            
                             pixel_depth = self.latest_depth_array[Y, X]
-                            
-                            # Only update if the depth is valid (> 0) AND closer than previous
-                            if 0 < pixel_depth < min_dist:
-                                min_dist = pixel_depth
-                                best_x = X
-                                best_y = Y
-                                # self.get_logger().info(f"New closest point found at ({X}, {Y}) with depth: {min_dist}")
+                            if pixel_depth > 0:
+                                valid_depths.append((pixel_depth, X, Y))
 
-                    # After checking all keypoints, assign the winning coordinates
-                    if min_dist != 1e9:
-                        center_x = best_x
-                        center_y = best_y
-                        depth_mm = min_dist
+                    # Take the median depth reading instead of the minimum
+                    if len(valid_depths) >= 3:
+                        valid_depths.sort(key=lambda d: d[0])
+                        median_idx = len(valid_depths) // 2
+                        depth_mm, center_x, center_y = valid_depths[median_idx]
+                    elif len(valid_depths) > 0:
+                        # Fewer than 3 keypoints visible — fall back to median of what we have
+                        valid_depths.sort(key=lambda d: d[0])
+                        median_idx = len(valid_depths) // 2
+                        depth_mm, center_x, center_y = valid_depths[median_idx]
                     else:
-                        # Fallback if no valid depth was found on any keypoint
                         depth_mm = 0
+                
                 
                 if depth_mm > 0:
 

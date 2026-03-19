@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<root BTCPP_format="4">
+  <BehaviorTree ID="follow_target">
+    <PipelineSequence name="NavigateWithReplanning">
+      <RateController hz="1.0">
+        <GoalUpdater input_goal="{goal}" output_goal="{updated_goal}">
+          <ComputePathToPose goal="{updated_goal}" path="{path}" 
+                             planner_id="GridBased"/>
+        </GoalUpdater>
+      </RateController>
+      <TruncatePathLocal
+        input_path="{path}"
+        output_path="{truncated_path}"
+        distance_forward="2.0"
+        distance_backward="0.5"
+        robot_frame="base_link"
+        max_robot_pose_search_dist="3.0"/>
+      <KeepRunningUntilFailure>
+        <FollowPath path="{truncated_path}" controller_id="FollowPath"/>
+      </KeepRunningUntilFailure>
+    </PipelineSequence>
+  </BehaviorTree>
+</root>

@@ -63,6 +63,9 @@ class Control(Node):
         self.last_goal_x = None
         self.last_goal_y = None
         self.deadband_radius = 0.4  # Require 25cm of movement to update the goal
+
+        self.last_goal_update_time = None
+        self.goal_update_min_interval = 0.3  # max ~3Hz goal updates
         
         # EMA Tracking in Odom Frame ---
         self.alpha = 0.5  # Smoothing factor (0.0 to 1.0)
@@ -75,6 +78,13 @@ class Control(Node):
 
         # Controls the LED to indicate state (Green = Target Visible, Yellow = Spinning, Red = Lost)
         self.led_controller = LedControl()
+
+        # Declare behavior tree parameter
+        self.declare_parameter("behavior_tree", value="")
+        self.bt_path = self.get_parameter("behavior_tree").get_parameter_value().string_value
+
+        self.last_nav_goal_time = None
+        self.nav_goal_min_interval = 2.0  # don't send new NavigateToPose faster than 2Hz
 
     def person_callback(self, msg):
         self.last_seen_time = self.get_clock().now()
@@ -117,12 +127,16 @@ class Control(Node):
             raw_person_x = person_odom.pose.position.x
             raw_person_y = person_odom.pose.position.y
             
+        
             if self.ema_person_x is None:
                 self.ema_person_x = raw_person_x
                 self.ema_person_y = raw_person_y
             else:
                 self.ema_person_x = (self.alpha * raw_person_x) + ((1.0 - self.alpha) * self.ema_person_x)
                 self.ema_person_y = (self.alpha * raw_person_y) + ((1.0 - self.alpha) * self.ema_person_y)
+
+            self.last_known_person_odom_x = self.ema_person_x
+            self.last_known_person_odom_y = self.ema_person_y
             
             # Create a dedicated pose for the marker (person's actual location)
             marker_pose = PoseStamped()
@@ -211,20 +225,35 @@ class Control(Node):
 
         # Use person_odom (the new target) to send to the action server!
         if not self.goal_sent:
+            now = self.get_clock().now()
+            if self.last_nav_goal_time is not None:
+                dt = (now - self.last_nav_goal_time).nanoseconds / 1e9
+                if dt < self.nav_goal_min_interval:
+                    return
             self.get_logger().info("Person detected! Starting pursuit...")
+            self.last_nav_goal_time = now
             self.send_nav_goal(person_odom)
             self.goal_sent = True
         else:
-            person_odom.header.stamp = self.get_clock().now().to_msg()
+            now = self.get_clock().now()
+            if self.last_goal_update_time is not None:
+                dt = (now - self.last_goal_update_time).nanoseconds / 1e9
+                if dt < self.goal_update_min_interval:
+                    return
+            self.last_goal_update_time = now
+            person_odom.header.stamp = now.to_msg()
             self.goal_update_pub.publish(person_odom)
-            self.get_logger().info("Path updated!")
 
     def send_nav_goal(self, initial_pose):
-        self.nav_client.wait_for_server()
+        if not self.nav_client.server_is_ready():
+            self.get_logger().warn("Nav server not ready, skipping goal.")
+            self.goal_sent = False
+            return
+
         goal_msg = NavigateToPose.Goal()
         goal_msg.pose = initial_pose
         
-        goal_msg.behavior_tree = "/home/robot/nav2_ws/src/navigation2/nav2_bt_navigator/behavior_trees/follow_target.xml" 
+        goal_msg.behavior_tree = self.bt_path
         
         self._send_goal_future = self.nav_client.send_goal_async(goal_msg)
         self._send_goal_future.add_done_callback(self.nav_response_callback)
@@ -283,6 +312,8 @@ class Control(Node):
         self.is_spinning = False
         self.spin_goal_handle = None
         self.get_logger().info("Spin sweep complete. Waiting for target to reappear...")
+        self.last_seen_time = self.get_clock().now()  # prevent immediate re-trigger
+        self.led_controller.set_color(LedControl.RED, blink_ms=500)
 
     def reset_callback(self, request, response):
         self.goal_sent = False

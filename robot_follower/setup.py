@@ -29,6 +29,7 @@ setup(
         *recursive_files('share/' + package_name, 'launch'),
         *recursive_files('share/' + package_name, 'config'),
         *recursive_files('share/' + package_name, 'models'),
+        *recursive_files('share/' + package_name, 'behavior_trees'),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
