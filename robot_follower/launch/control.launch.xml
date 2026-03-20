@@ -1,0 +1,9 @@
+<launch>
+    <node pkg="robot_follower" exec="control" name="control">
+        <remap from="/goal_pose" to="/j100_0076/goal_pose"/>
+        <remap from="/tf" to="/j100_0076/tf"/>
+        <remap from="/tf_static" to="/j100_0076/tf_static"/>
+        <param name="behavior_tree" 
+         value="$(find-pkg-share robot_follower)/behavior_trees/follow_target.xml"/>
+    </node>
+</launch>

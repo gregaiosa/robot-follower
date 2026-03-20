@@ -42,7 +42,7 @@ controller_server:
       plugin: "nav2_mppi_controller::MPPIController"
       time_steps: 32
       model_dt: 0.05
-      batch_size: 1000
+      batch_size: 2000
       ax_max: 1.5
       ax_min: -1.5
       ay_max: 6.0
@@ -60,7 +60,7 @@ controller_server:
       temperature: 0.3
       gamma: 0.015
       motion_model: "DiffDrive"
-      visualize: false
+      visualize: true
       regenerate_noises: true
       TrajectoryVisualizer:
         trajectory_step: 5
@@ -128,8 +128,8 @@ local_costmap:
     ros__parameters:
       transform_tolerance: 0.5
       enable_stamped_cmd_vel: true
-      update_frequency: 5.0
-      publish_frequency: 1.0
+      update_frequency: 10.0
+      publish_frequency: 5.0
       global_frame: odom
       robot_base_frame: base_link
       rolling_window: true
@@ -175,7 +175,7 @@ global_costmap:
       transform_tolerance: 0.5
       enable_stamped_cmd_vel: true
       update_frequency: 2.0
-      publish_frequency: 0.5
+      publish_frequency: 1.0
       global_frame: map
       robot_base_frame: base_link
       footprint: "[ [0.254, 0.2159], [0.254, -0.2159], [-0.254, -0.2159], [-0.254, 0.2159] ]"
