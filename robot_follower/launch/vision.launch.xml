@@ -17,6 +17,7 @@
         <!-- <param name="hand_model" value="$(find-pkg-share robot_follower)/models/hand_pose_openvino_model/"/> -->
         <!-- <param name="hand_model" value="$(find-pkg-share robot_follower)/models/hand_pose_ncnn_model/"/> -->
         <param name="hand_model" value="$(find-pkg-share robot_follower)/models/hand_pose.pt"/>
+        <!-- <param name="hand_model" value="$(find-pkg-share robot_follower)/models/hand_pose.engine"/> -->
 
 
         

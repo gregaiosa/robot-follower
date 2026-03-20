@@ -9,8 +9,7 @@ import numpy as np
 from tf2_ros import TransformBroadcaster, TransformStamped
 from geometry_msgs.msg import PoseStamped
 # from robot_follower.led_control import LedControl
-from rclpy.qos import qos_profile_sensor_data
-from scipy.spatial.transform import Rotation as R
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicyfrom scipy.spatial.transform import Rotation as R
 from enum import auto, Enum
 from std_srvs.srv import SetBool
 
@@ -26,6 +25,21 @@ class Vision(Node):
         self.bridge = CvBridge()
         # self.declare_parameter("model",
         #                        value="yolo26n.pt")
+
+        camera_qos = QoSProfile(
+                reliability=QoSReliabilityPolicy.RELIABLE,
+                durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+                history=QoSHistoryPolicy.KEEP_LAST,
+                depth=10
+                )
+
+        sensor_qos = QoSProfile(
+                reliability=QoSReliabilityPolicy.RELIABLE,
+                durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+                history=QoSHistoryPolicy.KEEP_LAST,
+                depth=1
+                )
+
         self.declare_parameter("model",
                                value="best.pt")
         self.model = YOLO(self.get_parameter("model").get_parameter_value().string_value)
@@ -52,8 +66,8 @@ class Vision(Node):
         self.topic = self.get_parameter("topic").get_parameter_value().string_value
         self.depth_topic = self.get_parameter("depth_topic").get_parameter_value().string_value
 
-        self.create_subscription(CompressedImage, self.topic, self.image_callback, qos_profile_sensor_data)
-        self.create_subscription(Image, self.depth_topic, self.depth_callback, qos_profile_sensor_data)
+        self.create_subscription(CompressedImage, self.topic, self.image_callback, camera_qos)
+        self.create_subscription(Image, self.depth_topic, self.depth_callback, sensor_qos)
         self.image_pub = self.create_publisher(CompressedImage, 'vision/image/compressed', 10)
         self.coord_pub = self.create_publisher(RegionOfInterest, 'vision/target_roi', 10)
 
@@ -68,7 +82,7 @@ class Vision(Node):
                     CameraInfo, 
                     '/j100_0076/sensors/camera_0/aligned_depth_to_color/camera_info',
                     self.info_callback,
-                    qos_profile_sensor_data)
+                    camera_qos)
         self.info_pub = self.create_publisher(CameraInfo, 'vision/camera_info', 10)
         self.intrinsics = None
         # self.led_controller = LedControl()
@@ -204,7 +218,7 @@ class Vision(Node):
                                             self.last_sent_gesture = confirmed
                                             self._send_gesture_command(movement)
                                             if movement:  # Go confirmed
-                                                self.gesture_control_active = False
+                                                # self.gesture_control_active = False
                                                 self.gesture_history = []
                                                 self.last_sent_gesture = None
                                                 self.get_logger().info("Go gesture confirmed. Hand model deactivated.")
