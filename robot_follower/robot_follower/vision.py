@@ -35,11 +35,11 @@ class Vision(Node):
                 )
 
         sensor_qos = QoSProfile(
-                reliability=QoSReliabilityPolicy.RELIABLE,
-                durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+                reliability=QoSReliabilityPolicy.BEST_EFFORT,
+                durability=QoSDurabilityPolicy.VOLATILE,
                 history=QoSHistoryPolicy.KEEP_LAST,
                 depth=1
-                )
+                )           
 
         self.declare_parameter("model",
                                value="best.pt")
