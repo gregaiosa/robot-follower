@@ -3,7 +3,8 @@ from rclpy.node import Node
 from rclpy.action import ActionClient
 from nav2_msgs.action import NavigateToPose, Spin
 from geometry_msgs.msg import PoseStamped
-from std_srvs.srv import Empty
+from std_srvs.srv import Empty, SetBool
+from std_msgs.msg import String
 import math
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
@@ -86,8 +87,25 @@ class Control(Node):
         self.last_nav_goal_time = None
         self.nav_goal_min_interval = 2.0  # don't send new NavigateToPose faster than 2Hz
 
+        # Publish current state
+        self.state_pub = self.create_publisher(String, 'control/state', 10)
+        self.state_msg = String()
+
+        # Service to control robot movement from vision node
+        self.movement_allowed = False
+        self.led_controller.set_color(LedControl.YELLOW, blink_ms=500)
+        self.gesture_service = self.create_service(SetBool, 'control/set_movement',
+                                                   self.set_movement_callback)
+
     def person_callback(self, msg):
         self.last_seen_time = self.get_clock().now()
+
+        if not self.movement_allowed:
+            if self.goal_handle and self.goal_sent:
+                self.goal_handle.cancel_goal_async()
+                self.goal_handle = None
+                self.goal_sent = False
+            return
         msg.header.stamp = self.get_clock().now().to_msg()
         marker_pose = None
         self.led_controller.set_color(LedControl.GREEN, blink_ms=0)
@@ -171,6 +189,8 @@ class Control(Node):
                         self.goal_handle.cancel_goal_async()
                         self.goal_handle = None
                         self.goal_sent = False
+                        self.state_msg.data = "Person nearby. Stopping"
+                        self.state_pub.publish(self.state_msg)
                     return 
                 
             # Calculate the new point exactly follow_distance in front of the person
@@ -222,6 +242,8 @@ class Control(Node):
             self.spin_goal_handle.cancel_goal_async()
             self.is_spinning = False
             self.spin_goal_handle = None
+            self.state_msg.data = "Person re-acquired. Following"
+                        
 
         # Use person_odom (the new target) to send to the action server!
         if not self.goal_sent:
@@ -234,6 +256,8 @@ class Control(Node):
             self.last_nav_goal_time = now
             self.send_nav_goal(person_odom)
             self.goal_sent = True
+            self.state_msg.data = "Following"
+            self.state_pub.publish(self.state_msg)
         else:
             now = self.get_clock().now()
             if self.last_goal_update_time is not None:
@@ -241,8 +265,26 @@ class Control(Node):
                 if dt < self.goal_update_min_interval:
                     return
             self.last_goal_update_time = now
+            self.state_msg.data = "Following"        
+            self.state_pub.publish(self.state_msg)
             person_odom.header.stamp = now.to_msg()
             self.goal_update_pub.publish(person_odom)
+
+    def set_movement_callback(self, request, response):
+        self.movement_allowed = request.data
+        state = "ENABLED" if request.data else "STOPPED by gesture"
+        self.get_logger().info(f"Movement {state}")
+        self.state_msg.data = "Following" if request.data else "Gesture stop"
+        self.state_pub.publish(self.state_msg)
+
+        if request.data:
+            self.led_controller.set_color(LedControl.GREEN, blink_ms=0)
+        else:
+            self.led_controller.set_color(LedControl.YELLOW, blink_ms=500)
+            
+        response.success = True
+        response.message = state
+        return response
 
     def send_nav_goal(self, initial_pose):
         if not self.nav_client.server_is_ready():
@@ -297,6 +339,8 @@ class Control(Node):
         self.is_spinning = True
         self._send_spin_future = self.spin_client.send_goal_async(goal_msg)
         self._send_spin_future.add_done_callback(self.spin_response_callback)
+        self.state_msg.data = "Person lost. Spinning"
+        self.state_pub.publish(self.state_msg)
 
     def spin_response_callback(self, future):
         self.spin_goal_handle = future.result()

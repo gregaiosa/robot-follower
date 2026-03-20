@@ -2,6 +2,7 @@ import rclpy
 from ultralytics import YOLO
 from rclpy.node import Node
 from sensor_msgs.msg import Image, CompressedImage, RegionOfInterest, CameraInfo
+from std_msgs.msg import String
 from cv_bridge import CvBridge
 import cv2
 import numpy as np
@@ -11,6 +12,7 @@ from geometry_msgs.msg import PoseStamped
 from rclpy.qos import qos_profile_sensor_data
 from scipy.spatial.transform import Rotation as R
 from enum import auto, Enum
+from std_srvs.srv import SetBool
 
 class State(Enum):
     """An enumeration that controls behavior based on yolo model being run."""
@@ -88,9 +90,22 @@ class Vision(Node):
         # Ensure a detection is consistent for a few frames before trusting it (helps with YOLO jitter)
         self.detection_streak = 0
         self.missed_frames = 0
-        self.declare_parameter("required_streak", value=4)
+        self.declare_parameter("required_streak", value=3)
         self.required_streak = self.get_parameter("required_streak").get_parameter_value().integer_value
         self.max_missed_frames = 3
+
+        self.state_sub = self.create_subscription(String, 'control/state', self.state_callback, 10)
+        self.control_state = "Waiting"
+        
+        # Set up service client to receive gesture commands from vision node
+        self.gesture_client = self.create_client(SetBool, 'control/set_movement')
+
+        # Ensure gesture happens for a few frames before changing the robot state
+        self.gesture_history = []
+        self.gesture_confirm_frames = 15
+        self.last_sent_gesture = None
+        self.gesture_control_active = True  # set False after go command received
+
 
     def info_callback(self, msg):
         self.intrinsics = {
@@ -150,7 +165,7 @@ class Vision(Node):
                         # Get the crop box for the right arm 
                         box = self.get_hand_crop_box(keypoints, cv_image.shape, side="right", scale_factor=1.5)
 
-                        if box:
+                        if box and self.gesture_control_active:
                             x1, y1, x2, y2 = box
                             raw_crop = cv_image[y1:y2, x1:x2]
                             h_crop, w_crop = raw_crop.shape[:2]
@@ -169,9 +184,37 @@ class Vision(Node):
                                 hand_kpts = hand_results[0].keypoints.data[0].cpu().numpy()
                                 gesture_name = self.recognize_gesture(hand_kpts)
                                 label = f"Gesture: {gesture_name}"
-                                cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                                if gesture_name != "Unknown":
-                                    self.get_logger().info(f"Robot sees command: {gesture_name}")
+                                cv2.putText(frame, label, (x1, y1 - 10),
+                                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+                                if gesture_name in ("Stop", "Go"):
+                                    self.gesture_history.append(gesture_name)
+                                else:
+                                    self.gesture_history = []
+
+                                # Keep only the last N frames
+                                self.gesture_history = self.gesture_history[-self.gesture_confirm_frames:]
+
+                                # Check if the last N frames are all the same gesture
+                                if len(self.gesture_history) == self.gesture_confirm_frames:
+                                    confirmed = self.gesture_history[0]
+                                    if all(g == confirmed for g in self.gesture_history):
+                                        movement = (confirmed == "Go")
+                                        if confirmed != self.last_sent_gesture:
+                                            self.last_sent_gesture = confirmed
+                                            self._send_gesture_command(movement)
+                                            if movement:  # Go confirmed
+                                                self.gesture_control_active = False
+                                                self.gesture_history = []
+                                                self.last_sent_gesture = None
+                                                self.get_logger().info("Go gesture confirmed. Hand model deactivated.")
+
+                                # Show confirmation progress on frame
+                                filled = len(self.gesture_history)
+                                bar_color = (0, 255, 0) if filled == self.gesture_confirm_frames else (0, 165, 255)
+                                cv2.rectangle(frame, (x1, y2 + 4), 
+                                              (x1 + int((filled / self.gesture_confirm_frames) * (x2 - x1)), y2 + 12),
+                                              bar_color, -1)
 
                         # Collect all valid keypoint depths instead of taking minimum
                         for kp in keypoints:
@@ -266,12 +309,26 @@ class Vision(Node):
             if self.missed_frames > self.max_missed_frames:
                 self.detection_streak = 0
                 self.ema_pose = None
+                self.gesture_history = []
+                self.last_sent_gesture = None
+
+        text = self.control_state
+        pos = (10, 30)
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        scale = 1
+        thickness = 2
+
+        # Black outline
+        cv2.putText(frame, text, pos, font, scale, (0, 0, 0), thickness + 4)
+        # Green text on top
+        cv2.putText(frame, text, pos, font, scale, (0, 255, 0), thickness)
 
         if self.intrinsics:
             info_msg = CameraInfo()
             info_msg.header = image.header
             self.info_pub.publish(info_msg)
         new_msg = self.bridge.cv2_to_compressed_imgmsg(frame)
+        
         # publish
         self.image_pub.publish(new_msg)
         
@@ -280,7 +337,7 @@ class Vision(Node):
         depth_image = self.bridge.imgmsg_to_cv2(depth_image, desired_encoding='passthrough')
         self.latest_depth_array = np.array(depth_image, dtype=np.uint16)
 
-    def get_hand_crop_box(self, keypoints, img_shape, side="right", scale_factor=1.5):
+    def get_hand_crop_box(self, keypoints, img_shape, side="right", scale_factor=2.5):
         """
         Calculates a dynamic bounding box for a hand based on elbow and wrist keypoints.
         
@@ -386,14 +443,30 @@ class Vision(Node):
 
         # Classify based on how many fingers are up
         if extended_fingers >= 1:
-            return "Stop (Open Hand)"
+            return "Stop"
         elif extended_fingers == 0:
-            return "Fist (Go)"
+            return "Go"
         # elif extended_fingers == 1 or extended_fingers == 2:
         #     # You can get fancy here later (e.g., checking if specifically the index finger is up)
         #     return "Pointing"
         else:
             return "Unknown"
+
+    def _send_gesture_command(self, movement_allowed: bool):
+        if not self.gesture_client.service_is_ready():
+            self.get_logger().warn("Control service not ready, skipping gesture command.")
+            return
+        request = SetBool.Request()
+        request.data = movement_allowed
+        future = self.gesture_client.call_async(request)
+        future.add_done_callback(
+            lambda f: self.get_logger().info(
+                f"Gesture command sent: {'GO' if movement_allowed else 'STOP'}"
+                )
+            )
+    
+    def state_callback(self, msg):
+        self.control_state = msg.data
 
 def main():
     rclpy.init()
