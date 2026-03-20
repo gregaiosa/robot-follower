@@ -9,7 +9,8 @@ import numpy as np
 from tf2_ros import TransformBroadcaster, TransformStamped
 from geometry_msgs.msg import PoseStamped
 # from robot_follower.led_control import LedControl
-from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicyfrom scipy.spatial.transform import Rotation as R
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicy
+from scipy.spatial.transform import Rotation as R
 from enum import auto, Enum
 from std_srvs.srv import SetBool
 
@@ -82,7 +83,7 @@ class Vision(Node):
                     CameraInfo, 
                     '/j100_0076/sensors/camera_0/aligned_depth_to_color/camera_info',
                     self.info_callback,
-                    camera_qos)
+                    sensor_qos)
         self.info_pub = self.create_publisher(CameraInfo, 'vision/camera_info', 10)
         self.intrinsics = None
         # self.led_controller = LedControl()
