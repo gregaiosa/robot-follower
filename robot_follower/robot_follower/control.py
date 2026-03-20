@@ -389,6 +389,9 @@ class Control(Node):
         if self.last_seen_time is None:
             return
 
+        if not self.movement_allowed: 
+            return
+
         time_since_seen = (self.get_clock().now() - self.last_seen_time).nanoseconds / 1e9
 
         if time_since_seen <= 0.5:
@@ -462,6 +465,9 @@ class Control(Node):
 
 
     def _trigger_spin(self):
+        if not self.movement_allowed:   
+            return
+
         if self.goal_handle and self.goal_sent:
             self.goal_handle.cancel_goal_async()
             self.goal_handle = None
