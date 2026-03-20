@@ -4,8 +4,8 @@ bt_navigator:
     global_frame: map
     robot_base_frame: base_link
     odom_topic: platform/odom/filtered
-    bt_loop_duration: 10
-    default_server_timeout: 20
+    bt_loop_duration: 20
+    default_server_timeout: 50
     wait_for_service_timeout: 5000
     action_server_result_timeout: 900.0
     navigators: ["navigate_to_pose", "navigate_through_poses"]
@@ -42,7 +42,7 @@ controller_server:
       plugin: "nav2_mppi_controller::MPPIController"
       time_steps: 32
       model_dt: 0.05
-      batch_size: 2000
+      batch_size: 1000
       ax_max: 1.5
       ax_min: -1.5
       ay_max: 6.0
@@ -60,7 +60,7 @@ controller_server:
       temperature: 0.3
       gamma: 0.015
       motion_model: "DiffDrive"
-      visualize: true
+      visualize: false
       regenerate_noises: true
       TrajectoryVisualizer:
         trajectory_step: 5
@@ -139,8 +139,6 @@ local_costmap:
       footprint: "[ [0.254, 0.2159], [0.254, -0.2159], [-0.254, -0.2159], [-0.254, 0.2159] ]"
       always_send_full_costmap: true
       plugins: ["static_layer", "voxel_layer", "inflation_layer"]
-      scan:
-        observation_persistence: 0.5
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 8.0
@@ -165,9 +163,11 @@ local_costmap:
           raytrace_min_range: 0.0
           obstacle_max_range: 2.5
           obstacle_min_range: 0.0
+          observation_persistence: 0.5
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: true
+        transform_tolerance: 0.5 
 
 global_costmap:
   global_costmap:
@@ -183,8 +183,6 @@ global_costmap:
       track_unknown_space: true
       always_send_full_costmap: true
       plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
-      scan:
-        observation_persistence: 0.5
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: true
@@ -199,9 +197,11 @@ global_costmap:
           raytrace_min_range: 0.0
           obstacle_max_range: 2.5
           obstacle_min_range: 0.0
+          observation_persistence: 0.5
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: true
+        transform_tolerance: 0.5 
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 8.0

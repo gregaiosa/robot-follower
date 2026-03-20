@@ -292,6 +292,10 @@ class Control(Node):
             self.goal_sent = False
             return
 
+        self.last_goal_update_time = self.get_clock().now()
+        self.last_goal_x = None
+        self.last_goal_y = None
+
         goal_msg = NavigateToPose.Goal()
         goal_msg.pose = initial_pose
         
@@ -306,6 +310,16 @@ class Control(Node):
             self.goal_sent = False
             return
             
+        if self.last_goal_x is not None:
+            fresh_update = PoseStamped()
+            fresh_update.header.frame_id = 'odom'
+            fresh_update.header.stamp = self.get_clock().now().to_msg()
+            fresh_update.pose.position.x = self.last_goal_x
+            fresh_update.pose.position.y = self.last_goal_y
+            fresh_update.pose.orientation.w = 1.0
+            self.goal_update_pub.publish(fresh_update)
+            self.last_goal_update_time = self.get_clock().now()
+
         self.get_result_future = self.goal_handle.get_result_async()
         self.get_result_future.add_done_callback(self.nav_result_callback)
 
